@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: video
+      POSTGRES_USER: video
+      POSTGRES_PASSWORD: video
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U video -d video"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/api.Dockerfile
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://video:video@postgres:5432/video
+      STORAGE_ROOT: /work/storage
+      PROJECTS_ROOT: /work/projects
+    volumes: ["studio-storage:/work/storage", "project-work:/work/projects"]
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/healthz', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/worker.Dockerfile
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://video:video@postgres:5432/video
+      STORAGE_ROOT: /work/storage
+      PROJECTS_ROOT: /work/projects
+    volumes: ["studio-storage:/work/storage", "project-work:/work/projects"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      sandbox: {condition: service_started}
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: ../../infra/web.Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    ports: ["3000:3000"]
+    depends_on:
+      api: {condition: service_healthy}
+
+  sandbox:
+    build:
+      context: ..
+      dockerfile: infra/sandbox/Dockerfile
+    read_only: true
+    network_mode: none
+    tmpfs:
+      - /tmp
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    command: ["sleep", "infinity"]
+
+volumes:
+  postgres-data:
+  studio-storage:
+  project-work:

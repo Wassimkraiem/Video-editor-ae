@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-editor-quality-harness"
+version = "0.1.0"
+description = "Quality controls for an AI video editing studio powered by Claude Agent SDK"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.0,<3.0",
+  "pydantic-settings>=2.0",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+agent = [
+  "claude-agent-sdk>=0.2.150",
+  "openai>=1.50",
+]
+api = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "python-multipart>=0.0.9",
+  "PyJWT>=2.8",
+  "pwdlib[argon2]>=0.2",
+  "sqlalchemy[asyncio]>=2.0",
+  "asyncpg>=0.29",
+  "aiosqlite>=0.20",
+  "alembic>=1.13",
+]
+media = [
+  "scenedetect[opencv]>=0.6.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["services*", "packages*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["services"]
+addopts = "-q"

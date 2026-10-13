@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VideoEditorTimeline",
+  "description": "Canonical timeline representation. Generated from packages/timeline_schema/models.py.",
+  "type": "object",
+  "required": ["schema_version", "fps", "width", "height", "duration_ms", "tracks"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "fps": {"type": "number", "exclusiveMinimum": 0},
+    "width": {"type": "integer", "exclusiveMinimum": 0},
+    "height": {"type": "integer", "exclusiveMinimum": 0},
+    "duration_ms": {"type": "integer", "exclusiveMinimum": 0},
+    "background": {"type": "string"},
+    "tracks": {"type": "array", "items": {"$ref": "#/$defs/track"}},
+    "markers": {"type": "array"},
+    "captions": {"type": "array"}
+  },
+  "$defs": {
+    "track": {
+      "type": "object",
+      "required": ["id", "type", "items"],
+      "properties": {
+        "id": {"type": "string"},
+        "type": {"enum": ["video", "audio", "text", "graphics", "image"]},
+        "items": {"type": "array"}
+      }
+    }
+  }
+}

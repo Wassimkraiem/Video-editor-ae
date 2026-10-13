@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root { background: #0b1020; color: #f8fafc; font-family: Inter, sans-serif; }
+      body { margin: 0; display: grid; place-items: center; height: 100vh; }
+      .frame { width: 100%; text-align: center; }
+      .eyebrow { letter-spacing: .2em; text-transform: uppercase; color: #7dd3fc; }
+      h1 { font-size: clamp(3rem, 10vw, 8rem); margin: .2em 0; }
+    </style>
+  </head>
+  <body>
+    <main class="frame" data-duration-ms="3000">
+      <p class="eyebrow" data-start-ms="0" data-end-ms="800">AI VIDEO STUDIO</p>
+      <h1 data-start-ms="400" data-end-ms="2600">Make the cut.</h1>
+    </main>
+    <script>
+      // HyperFrames owns playback and timeline mounting. This composition
+      // contains deterministic markup only; no media controls are called here.
+    </script>
+  </body>
+</html>

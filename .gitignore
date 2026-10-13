@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.next/
+node_modules/
+quality-eval-results.json
+.agent-context/
+CLAUDE.md
+storyboard.json

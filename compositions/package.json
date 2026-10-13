@@ -1,0 +1,11 @@
+{
+  "name": "video-editor-compositions",
+  "private": true,
+  "dependencies": {
+    "@hyperframes/engine": "0.8.152",
+    "@hyperframes/player": "0.8.152",
+    "@hyperframes/producer": "0.8.152",
+    "gsap": "3.12.5",
+    "hyperframes": "0.8.152"
+  }
+}
