@@ -7,6 +7,8 @@ WORKDIR /app
 COPY pyproject.toml README.md alembic.ini ./
 COPY services ./services
 COPY packages ./packages
+# The API seeds the skill catalog and installs skills into new projects.
+COPY skills ./skills
 RUN pip install --no-cache-dir -e '.[api]'
 RUN useradd --create-home --uid 10001 app \
     && mkdir -p /work/storage /work/projects \

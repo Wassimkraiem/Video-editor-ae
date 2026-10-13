@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <style>
+        @font-face {
+          font-family: "Kachabiti Sans";
+          src: url("fonts/segoeuib.ttf") format("truetype");
+          font-weight: 700;
+          font-display: block;
+        }
+        @font-face {
+          font-family: "Kachabiti Display";
+          src: url("fonts/majallab.ttf") format("truetype");
+          font-weight: 700;
+          font-display: block;
+        }
+        @font-face {
+          font-family: "Inter";
+          src: url("fonts/Inter-700-latin.woff2") format("woff2");
+          font-weight: 700;
+          font-display: block;
+        }
+        #graphics {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          font-family: "Kachabiti Sans", sans-serif;
+          color: #1b1712;
+          --ink: #1b1712;
+          --gold: #b08d4f;
+          --gold-dk: #7a5c28;
+          --gold-lt: #e9cf94;
+          --cream: rgba(250, 246, 238, 0.9);
+        }
+        .g-layer {
+          position: absolute;
+          inset: 0;
+        }
+        /* liquid glass: frosted + saturated backdrop, bright rim, inner glow, soft drop */
+        .glass {
+          position: absolute;
+          background: linear-gradient(140deg, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0.07) 45%, rgba(255, 255, 255, 0.14) 100%),
+            rgba(24, 19, 14, 0.34);
+          backdrop-filter: blur(22px) saturate(175%) brightness(0.92);
+          -webkit-backdrop-filter: blur(22px) saturate(175%) brightness(0.92);
+          border: 1.5px solid rgba(255, 255, 255, 0.42);
+          border-radius: 26px;
+          box-shadow: inset 0 1.5px 0 rgba(255, 255, 255, 0.7), inset 0 -1px 0 rgba(255, 255, 255, 0.18),
+            inset 0 0 28px rgba(255, 255, 255, 0.1), 0 16px 40px rgba(0, 0, 0, 0.28);
+          color: #ffffff;
+          text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+        }
+        .latin {
+          font-family: "Inter", sans-serif;
+          font-weight: 700;
+          direction: ltr;
+        }
+        svg.ic {
+          fill: none;
+          stroke: var(--gold);
+          stroke-width: 2.2;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+        }
+
+        /* ── intro ── */
+        #g-intro-card {
+          left: 190px;
+          width: 700px;
+          top: 850px;
+          height: 214px;
+        }
+        #g-intro-kick {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 868px;
+          text-align: center;
+          font-size: 20px;
+          letter-spacing: 0.34em;
+          color: var(--gold-lt);
+        }
+        #g-intro-title {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 900px;
+          text-align: center;
+          font-family: "Kachabiti Display", serif;
+          font-weight: 700;
+          font-size: 104px;
+          line-height: 1.05;
+          direction: rtl;
+          color: #ffffff;
+          text-shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+        }
+        #g-intro-rule {
+          position: absolute;
+          left: 400px;
+          width: 280px;
+          top: 1030px;
+          height: 2px;
+          background: var(--gold);
+          transform-origin: 50% 50%;
+        }
+
+        /* ── chips ── */
+        .chip {
+          position: absolute;
+          height: 76px;
+          padding: 0 30px 0 26px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          direction: rtl;
+          border-radius: 38px;
+          font-size: 36px;
+          white-space: nowrap;
+        }
+        .chip svg.ic {
+          width: 32px;
+          height: 32px;
+        }
+        #g-hero {
+          position: absolute;
+          left: 170px;
+          width: 740px;
+          top: 890px;
+          height: 120px;
+          border-radius: 60px;
+          background: linear-gradient(140deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 50%, rgba(233, 207, 148, 0.16) 100%),
+            rgba(20, 15, 10, 0.5);
+          backdrop-filter: blur(24px) saturate(170%);
+          -webkit-backdrop-filter: blur(24px) saturate(170%);
+          border: 1.5px solid rgba(233, 207, 148, 0.75);
+          box-shadow: inset 0 1.5px 0 rgba(255, 245, 220, 0.75), inset 0 0 30px rgba(233, 207, 148, 0.12), 0 16px 44px rgba(0, 0, 0, 0.35);
+          text-align: center;
+          overflow: hidden;
+        }
+        #g-hero-k {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 20px;
+          font-size: 17px;
+          letter-spacing: 0.42em;
+          color: rgba(233, 207, 148, 0.75);
+        }
+        #g-hero-t {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 44px;
+          font-size: 50px;
+          letter-spacing: 0.06em;
+          color: var(--gold-lt);
+        }
+        #g-hero-sheen {
+          position: absolute;
+          top: -20px;
+          left: 0;
+          width: 160px;
+          height: 160px;
+          background: linear-gradient(100deg, rgba(255, 255, 255, 0) 0%, rgba(255, 240, 200, 0.45) 50%, rgba(255, 255, 255, 0) 100%);
+        }
+
+        /* ── big keyword cards ── */
+        .kw {
+          left: 0;
+          right: 0;
+          margin: 0 auto;
+          width: fit-content;
+          top: 846px;
+          height: 236px;
+          padding: 0 64px;
+          display: flex;
+          align-items: center;
+          gap: 26px;
+          direction: rtl;
+          border-radius: 118px;
+        }
+        .kw svg.ic {
+          width: 84px;
+          height: 84px;
+          stroke: var(--gold-lt);
+          stroke-width: 1.8;
+        }
+        .kw .kw-t {
+          display: flex;
+          gap: 26px;
+          font-family: "Kachabiti Display", serif;
+          font-weight: 700;
+          font-size: 150px;
+          line-height: 1;
+          padding-top: 18px;
+          overflow: hidden;
+        }
+        .kw .kw-w {
+          display: inline-block;
+        }
+        .kw .kw-w.gold {
+          color: var(--gold-lt);
+        }
+        .kw .kw-line {
+          position: absolute;
+          left: 64px;
+          right: 64px;
+          bottom: 30px;
+          height: 3px;
+          border-radius: 2px;
+          background: linear-gradient(90deg, rgba(233, 207, 148, 0), var(--gold-lt), rgba(233, 207, 148, 0));
+        }
+
+        /* ── lifestyle tiles ── */
+        .tile {
+          width: 290px;
+          height: 176px;
+          top: 872px;
+          text-align: center;
+          direction: rtl;
+        }
+        .tile svg.ic {
+          display: block;
+          width: 64px;
+          height: 64px;
+          margin: 22px auto 8px;
+        }
+        .tile .tl {
+          font-size: 34px;
+        }
+        .tile .tl.latin {
+          font-size: 30px;
+        }
+
+        /* ── price ── */
+        .price {
+          top: 842px;
+          width: 270px;
+          height: 236px;
+          text-align: center;
+          overflow: hidden;
+        }
+        .price .bar {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 0;
+          height: 6px;
+          background: var(--gold);
+        }
+        .price .pk {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 26px;
+          font-size: 30px;
+          direction: rtl;
+        }
+        .price .pk.latin {
+          font-size: 20px;
+          letter-spacing: 0.3em;
+          top: 34px;
+          color: var(--gold-lt);
+        }
+        .price .pv {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 74px;
+          font-size: 100px;
+          line-height: 1;
+          letter-spacing: -0.03em;
+        }
+        .price .pv small {
+          font-size: 30px;
+          letter-spacing: 0.04em;
+          margin-left: 6px;
+          color: var(--gold-lt);
+        }
+        .price .ps {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 184px;
+          font-size: 22px;
+          color: rgba(255, 255, 255, 0.82);
+        }
+        #g-old {
+          position: absolute;
+          left: 30px;
+          top: 184px;
+          font-size: 24px;
+          color: rgba(255, 255, 255, 0.7);
+        }
+        #g-old-strike {
+          position: absolute;
+          left: 26px;
+          top: 198px;
+          width: 112px;
+          height: 3px;
+          background: #b5452f;
+          transform-origin: 0% 50%;
+        }
+        #g-save {
+          position: absolute;
+          right: 22px;
+          top: 178px;
+          height: 40px;
+          padding: 0 14px;
+          border-radius: 20px;
+          background: var(--gold-lt);
+          color: #1b1712;
+          text-shadow: none;
+          font-size: 22px;
+          line-height: 40px;
+        }
+
+        /* ── order ── */
+        #g-order {
+          left: 772px;
+          width: 270px;
+          top: 58px;
+          height: 330px;
+          top: 800px;
+          direction: rtl;
+        }
+        #g-order-h {
+          position: absolute;
+          right: 22px;
+          left: 18px;
+          top: 20px;
+          height: 52px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 30px;
+        }
+        #g-order-h svg.ic {
+          width: 36px;
+          height: 36px;
+        }
+        .row {
+          position: absolute;
+          right: 26px;
+          left: 20px;
+          height: 52px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          font-size: 30px;
+          border-top: 1px solid rgba(176, 141, 79, 0.3);
+        }
+        .row svg.ic {
+          width: 28px;
+          height: 28px;
+          stroke-width: 3;
+        }
+        #g-deliver {
+          left: 38px;
+          width: 290px;
+          top: 58px;
+          height: 170px;
+          top: 880px;
+          text-align: center;
+          direction: rtl;
+        }
+        #g-deliver svg.ic {
+          display: block;
+          width: 72px;
+          height: 72px;
+          margin: 16px auto 4px;
+        }
+        #g-deliver .tl {
+          font-size: 32px;
+        }
+
+        /* ── end ── */
+        #g-end {
+          left: 300px;
+          width: 480px;
+          top: 90px;
+          height: 168px;
+          border-radius: 84px;
+        }
+        #g-end img {
+          position: absolute;
+          left: 46px;
+          top: 26px;
+          height: 116px;
+        }
+        #g-end-name {
+          position: absolute;
+          left: 236px;
+          top: 50px;
+          font-size: 30px;
+          letter-spacing: 0.28em;
+        }
+        #g-end-sub {
+          position: absolute;
+          left: 238px;
+          top: 94px;
+          font-size: 15px;
+          letter-spacing: 0.3em;
+          color: var(--gold-lt);
+        }
+      </style>
+
+      <div id="graphics" data-composition-id="graphics" data-width="1080" data-height="1920">
+        <svg width="0" height="0" style="position: absolute">
+          <defs>
+            <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" /></symbol>
+            <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 2v20M3.3 7l17.4 10M3.3 17l17.4-10M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5" /></symbol>
+            <symbol id="i-hour" viewBox="0 0 24 24"><path d="M6 2h12M6 22h12M7 2c0 6 10 6 10 10S7 16 7 22M17 2c0 6-10 6-10 10s10 4 10 10" /></symbol>
+            <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5" /></symbol>
+            <symbol id="i-family" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2.6" /><circle cx="17" cy="6" r="2.6" /><circle cx="12" cy="11.5" r="2" /><path d="M2.5 20v-3.5A4.5 4.5 0 0 1 7 12h0a4.5 4.5 0 0 1 3 1.1M21.5 20v-3.5A4.5 4.5 0 0 0 17 12h0a4.5 4.5 0 0 0-3 1.1M8.8 20v-1.7a3.2 3.2 0 0 1 6.4 0V20" /></symbol>
+            <symbol id="i-tent" viewBox="0 0 24 24"><path d="M12 3 2 21h20L12 3zM12 3l5.5 18M12 21l-3-6h0M3.5 3.5 7 8M20.5 3.5 17 8" /></symbol>
+            <symbol id="i-tree" viewBox="0 0 24 24"><path d="M12 2 6 10h3l-4 6h14l-4-6h3L12 2zM12 16v6" /></symbol>
+            <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.8A8 8 0 1 1 21 12z" /><path d="M8.5 12h.01M12 12h.01M15.5 12h.01" /></symbol>
+            <symbol id="i-truck" viewBox="0 0 24 24"><path d="M2 6h11v10H2zM13 9h4.5l3.5 3.5V16h-8" /><circle cx="6" cy="17.5" r="2" /><circle cx="17" cy="17.5" r="2" /></symbol>
+            <symbol id="i-gem" viewBox="0 0 24 24"><path d="M6 3h12l4 6-10 12L2 9l4-6zM2 9h20M9 3l3 18M15 3l-3 18" /></symbol>
+          </defs>
+        </svg>
+
+        <!-- intro -->
+        <div id="g-intro" class="g-layer">
+          <div id="g-intro-card" class="glass"></div>
+          <div id="g-intro-kick" class="latin" data-layout-allow-overlap>KACHABITI · CACHEMIRE</div>
+          <div id="g-intro-title">قشابية الكشمير</div>
+          <div id="g-intro-rule"></div>
+        </div>
+
+        <!-- features -->
+        <div id="g-feat" class="g-layer">
+          <div id="g-c1" class="glass chip" style="left: 560px; top: 928px"><svg class="ic"><use href="#i-sun" /></svg><span>دافية</span></div>
+          <div id="g-c2" class="glass chip" style="left: 190px; top: 928px"><svg class="ic"><use href="#i-snow" /></svg><span>تحمي من البرد</span></div>
+          <div id="g-hero">
+            <div id="g-hero-k" class="latin">CACHEMIRE</div>
+            <div id="g-hero-t" class="latin">HAUT DE GAMME</div>
+            <div id="g-hero-sheen"></div>
+          </div>
+          <div id="g-k1" class="glass kw"><svg class="ic"><use href="#i-hour" /></svg><div class="kw-t"><span id="g-k1-a" class="kw-w">تدوم</span><span id="g-k1-b" class="kw-w gold">سنين</span></div><div id="g-k1-l" class="kw-line"></div></div>
+          <div id="g-k2" class="glass kw"><svg class="ic"><use href="#i-check" /></svg><div class="kw-t"><span id="g-k2-a" class="kw-w">ما</span><span id="g-k2-b" class="kw-w gold">تلفلفش</span></div><div id="g-k2-l" class="kw-line"></div></div>
+          <div id="g-k3" class="glass kw"><svg class="ic"><use href="#i-gem" /></svg><div class="kw-t"><span id="g-k3-a" class="kw-w">الخامة</span><span id="g-k3-b" class="kw-w gold">الممتازة</span></div><div id="g-k3-l" class="kw-line"></div></div>
+          <div id="g-c3" class="glass chip" style="left: 0; right: 0; margin: 0 auto; width: fit-content; top: 928px"><svg class="ic"><use href="#i-hour" /></svg><span>تدوم سنين</span></div>
+          <div id="g-c4" class="glass chip" style="left: 0; right: 0; margin: 0 auto; width: fit-content; top: 928px"><svg class="ic"><use href="#i-check" /></svg><span>ما تلفلفش</span></div>
+        </div>
+
+        <!-- price -->
+        <div id="g-price" class="g-layer">
+          <div id="g-p1" class="glass price" style="left: 772px">
+            <div class="bar"></div>
+            <div class="pk">القشابية</div>
+            <div class="pv latin"><span id="g-p1-n">79</span><small>DT</small></div>
+            <div class="ps">كشمير haut de gamme</div>
+          </div>
+          <div id="g-p2" class="glass price" style="left: 38px">
+            <div class="bar"></div>
+            <div class="pk latin">PACK DE 3</div>
+            <div class="pv latin"><span id="g-p2-n">199</span><small>DT</small></div>
+            <div id="g-old" class="latin">237 DT</div>
+            <div id="g-old-strike"></div>
+            <div id="g-save" class="latin">-38 DT</div>
+          </div>
+        </div>
+
+        <!-- order -->
+        <div id="g-ord" class="g-layer">
+          <div id="g-order" class="glass">
+            <div id="g-order-h"><svg class="ic"><use href="#i-chat" /></svg><span>ابعثلنا ميساج</span></div>
+            <div id="g-r1" class="row" style="top: 90px"><svg class="ic"><use href="#i-check" /></svg><span>الطول</span></div>
+            <div id="g-r2" class="row" style="top: 148px"><svg class="ic"><use href="#i-check" /></svg><span>الوزن</span></div>
+            <div id="g-r3" class="row" style="top: 206px"><svg class="ic"><use href="#i-check" /></svg><span>الرقم</span></div>
+            <div id="g-r4" class="row" style="top: 264px"><svg class="ic"><use href="#i-check" /></svg><span>العنوان</span></div>
+          </div>
+          <div id="g-deliver" class="glass"><svg class="ic"><use href="#i-truck" /></svg><div class="tl">توصيل لباب الدار</div></div>
+        </div>
+
+        <!-- end -->
+        <div id="g-end" class="glass">
+          <img src="assets/logo-white.png" alt="قشابيتي">
+          <div id="g-end-name" class="latin">KACHABITI</div>
+          <div id="g-end-sub" class="latin">CACHEMIRE</div>
+        </div>
+      </div>
+
+      <script>
+        (function () {
+          const tl = gsap.timeline({ paused: true });
+          const q = (s) => "#graphics " + s;
+          const popIn = (sel, at, from) =>
+            tl.fromTo(q(sel), Object.assign({ opacity: 0, y: -18, scale: 0.92, filter: "blur(6px)" }, from || {}),
+              { opacity: 1, y: 0, x: 0, scale: 1, filter: "blur(0px)", duration: 0.6, ease: "power2.out" }, at);
+          const out = (sel, at) =>
+            tl.to(q(sel), { opacity: 0, y: -14, filter: "blur(6px)", duration: 0.3, ease: "power2.in" }, at);
+
+          // hide every group's pieces at t=0
+          tl.set(q(".chip, #g-hero, .tile, .price, #g-order, #g-order-h, .row, #g-deliver, #g-end, #g-intro-kick, #g-intro-title, #g-old, #g-save, #g-intro-card, .kw"), { opacity: 0 }, 0);
+          popIn("#g-intro-card", 1.6, { y: 16 });
+          out("#g-intro-card", 2.32);
+
+          // ── intro 0.25 → 4.3 ──
+          tl.fromTo(q("#g-intro-kick"), { opacity: 0, scale: 1.25, filter: "blur(6px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.5, ease: "power3.out" }, 1.62);
+          popIn("#g-intro-title", 1.66, { y: 24 });
+          tl.fromTo(q("#g-intro-rule"), { scaleX: 0 }, { scaleX: 1, duration: 0.45, ease: "power3.inOut" }, 1.8);
+          out("#g-intro-kick", 2.3);
+          out("#g-intro-title", 2.32);
+          tl.to(q("#g-intro-rule"), { scaleX: 0, duration: 0.3, ease: "power2.in" }, 2.32);
+
+          // ── features 5.0 → 12.0 ──
+          popIn("#g-c1", 5.0, { x: 30 });
+          popIn("#g-c2", 5.64, { x: 30 });
+          out("#g-c1", 6.38);
+          out("#g-c2", 6.4);
+          tl.fromTo(q("#g-hero"), { opacity: 0, scale: 0.7, filter: "blur(10px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.6, ease: "power2.out" }, 8.7);
+          tl.fromTo(q("#g-hero-sheen"), { x: -200 }, { x: 900, duration: 0.9, ease: "power2.inOut" }, 8.95);
+          out("#g-hero", 9.62);
+          // big keyword cards — card glides in, each word rises on its spoken onset,
+          // gold line sweeps, a slow breathing scale while it holds, soft exit
+          const kw = (id, tIn, tA, tB, tOut) => {
+            tl.fromTo(q(id), { opacity: 0, scale: 0.86, filter: "blur(12px)" },
+              { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.5, ease: "power3.out" }, tIn);
+            tl.fromTo(q(id + " svg"), { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.5, ease: "power3.out" }, tIn + 0.08);
+            tl.fromTo(q(id + "-a"), { yPercent: 110, opacity: 0 }, { yPercent: 0, opacity: 1, duration: 0.45, ease: "power3.out" }, tA);
+            tl.fromTo(q(id + "-b"), { yPercent: 110, opacity: 0, scale: 0.9 }, { yPercent: 0, opacity: 1, scale: 1, duration: 0.5, ease: "power3.out" }, tB);
+            tl.fromTo(q(id + "-l"), { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power2.inOut" }, tB + 0.05);
+            tl.to(q(id + " .kw-t"), { scale: 1.04, duration: Math.max(0.3, tOut - tB), ease: "sine.inOut" }, tB);
+            tl.to(q(id), { opacity: 0, scale: 1.06, filter: "blur(10px)", duration: 0.28, ease: "power2.in" }, tOut);
+          };
+          kw("#g-k1", 9.8, 10.12, 10.62, 10.74);   // اللي يدوم معاك سنين
+          kw("#g-k2", 10.98, 10.98, 11.44, 11.72); // وما يلفلفش (kinetic scene wipes in at 11.7)
+          kw("#g-k3", 18.6, 18.64, 19.1, 19.45);   // الخامة الممتازة
+
+          // ── price 19.6 → 24.5 ──
+          popIn("#g-p1", 19.62, { y: 24 });
+          const n1 = { v: 0 };
+          tl.fromTo(n1, { v: 0 }, { v: 79, duration: 0.7, ease: "power2.out",
+            onUpdate: () => { const el = document.querySelector("#g-p1-n"); if (el) el.textContent = Math.round(n1.v); } }, 19.88);
+          popIn("#g-p2", 21.08, { y: 24 });
+          const n2 = { v: 0 };
+          tl.fromTo(n2, { v: 0 }, { v: 199, duration: 0.6, ease: "power3.out", immediateRender: false,
+            onUpdate: () => { const el = document.querySelector("#g-p2-n"); if (el) el.textContent = Math.round(n2.v); } }, 22.32);
+                    tl.fromTo(q("#g-old"), { opacity: 0 }, { opacity: 1, duration: 0.25 }, 22.8);
+          tl.fromTo(q("#g-old-strike"), { scaleX: 0 }, { scaleX: 1, duration: 0.25, ease: "power2.out" }, 23.0);
+          tl.fromTo(q("#g-save"), { opacity: 0, scale: 0.85 }, { opacity: 1, scale: 1, duration: 0.4, ease: "power2.out" }, 23.2);
+          out("#g-p1", 24.3);
+          out("#g-p2", 24.35);
+
+          // ── order 24.72 → 30.5 ──
+          popIn("#g-order", 26.5, { x: 40, y: 0 });
+          popIn("#g-order-h", 26.62, { y: 10 });
+          [["#g-r1", 27.52], ["#g-r2", 27.84], ["#g-r3", 28.22], ["#g-r4", 28.94]].forEach(([r, a]) => {
+            tl.fromTo(q(r), { opacity: 0, x: 24 }, { opacity: 1, x: 0, duration: 0.3, ease: "power2.out" }, a);
+            tl.fromTo(q(r + " svg"), { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.3, ease: "power2.out" }, a + 0.08);
+          });
+          popIn("#g-deliver", 29.34, { x: -40, y: 0 });
+          tl.fromTo(q("#g-deliver svg"), { x: -30 }, { x: 0, duration: 0.6, ease: "power3.out" }, 29.4);
+          out("#g-order", 30.3);
+          out("#g-deliver", 30.35);
+
+          // ── end 30.58 → 32.77 ──
+          tl.fromTo(q("#g-end"), { opacity: 0, scale: 0.85, filter: "blur(8px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: 0.55, ease: "power3.out" }, 30.58);
+          tl.fromTo(q("#g-end img"), { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 30.75);
+          tl.fromTo(q("#g-end-name"), { opacity: 0, x: 24 }, { opacity: 1, x: 0, duration: 0.8, ease: "power3.out" }, 30.9);
+          tl.fromTo(q("#g-end-sub"), { opacity: 0 }, { opacity: 1, duration: 0.5 }, 31.2);
+
+          window.__timelines["graphics"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

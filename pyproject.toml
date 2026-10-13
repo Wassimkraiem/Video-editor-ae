@@ -16,6 +16,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  # starlette's TestClient transport
+  "httpx2",
 ]
 agent = [
   "claude-agent-sdk>=0.2.150",
@@ -34,6 +36,12 @@ api = [
 ]
 media = [
   "scenedetect[opencv]>=0.6.4",
+]
+# Python deps of the bundled skill scripts (wassim-style, devin-style, ...).
+skills = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "faster-whisper>=1.0",
 ]
 
 [tool.setuptools.packages.find]

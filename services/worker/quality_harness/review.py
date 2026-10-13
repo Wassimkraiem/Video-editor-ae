@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any, Protocol
 
 from .models import ReviewInput, ReviewResult
+
+
+def parse_review_json(text: str) -> dict[str, Any]:
+    """Parse the reviewer's verdict, tolerating code fences and prose around it."""
+
+    candidate = text.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, re.DOTALL)
+    if fenced:
+        candidate = fenced.group(1)
+    elif not candidate.startswith("{"):
+        start, end = candidate.find("{"), candidate.rfind("}")
+        if start != -1 and end > start:
+            candidate = candidate[start : end + 1]
+    parsed = json.loads(candidate)
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("Reviewer verdict is not an object", candidate, 0)
+    return parsed
 
 
 class Reviewer(Protocol):
@@ -56,7 +74,7 @@ class SDKReviewer:
             result = self.query(prompt=prompt, model=self.model)
         if hasattr(result, "text"):
             result = result.text
-        parsed = json.loads(str(result))
+        parsed = parse_review_json(str(result))
         return bool(parsed.get("passed", False)), [str(item) for item in parsed.get("issues", [])]
 
 
@@ -80,7 +98,7 @@ async def run_blind_sdk_review(review_input: ReviewInput, *, model: str = "claud
         candidate = getattr(message, "result", None) or getattr(message, "text", None)
         if candidate:
             try:
-                parsed = json.loads(str(candidate))
+                parsed = parse_review_json(str(candidate))
                 return bool(parsed.get("passed", False)), [str(item) for item in parsed.get("issues", [])]
             except json.JSONDecodeError:
                 continue

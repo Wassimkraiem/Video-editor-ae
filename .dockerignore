@@ -45,3 +45,7 @@ temp/
 *.jpg
 *.jpeg
 *.gif
+
+# Skills ship their own SFX, fonts and reference images.
+!skills/**
+skills/**/__pycache__/

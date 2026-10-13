@@ -9,5 +9,7 @@ __pycache__/
 node_modules/
 quality-eval-results.json
 .agent-context/
-CLAUDE.md
 storyboard.json
+.env
+.local/
+*.db

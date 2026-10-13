@@ -94,8 +94,8 @@ class PostgresJobQueue:
             await session.commit()
         job.status = "succeeded"
 
-    async def fail(self, job: JobRecord, error: str) -> None:
-        next_status = "dead" if job.attempts >= self.max_attempts else "queued"
+    async def fail(self, job: JobRecord, error: str, *, retry: bool = True) -> None:
+        next_status = "dead" if not retry or job.attempts >= self.max_attempts else "queued"
         async with self.sessions() as session:
             from sqlalchemy import text
 

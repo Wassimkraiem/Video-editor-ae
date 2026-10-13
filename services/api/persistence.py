@@ -92,7 +92,8 @@ class PostgresPersistence:
 
         async with self._session_factory()() as session:
             query = select(Project).outerjoin(ProjectMember, ProjectMember.project_id == Project.id).where(Project.id == project_id, or_(Project.owner_id == user_id, ProjectMember.user_id == user_id))
-            record = (await session.execute(query)).scalar_one_or_none()
+            # One row per membership: take the first rather than demanding one.
+            record = (await session.execute(query)).scalars().first()
         return None if record is None else self._project_dict(record)
 
     async def projects(self, user_id: str) -> list[dict[str, Any]]:
@@ -100,9 +101,12 @@ class PostgresPersistence:
         from services.api.db_models import Project, ProjectMember
 
         async with self._session_factory()() as session:
-            query = select(Project).outerjoin(ProjectMember, ProjectMember.project_id == Project.id).where(or_(Project.owner_id == user_id, ProjectMember.user_id == user_id)).distinct()
+            # No DISTINCT: Postgres cannot compare the JSON ``profile`` column.
+            # The outer join can repeat a project, so dedupe by id here.
+            query = select(Project).outerjoin(ProjectMember, ProjectMember.project_id == Project.id).where(or_(Project.owner_id == user_id, ProjectMember.user_id == user_id)).order_by(Project.created_at.desc())
             records = (await session.execute(query)).scalars().all()
-        return [self._project_dict(record) for record in records]
+        unique = {record.id: record for record in records}
+        return [self._project_dict(record) for record in unique.values()]
 
     async def update_project(self, project_id: str, values: dict[str, Any]) -> dict[str, Any] | None:
         from sqlalchemy import update
@@ -185,3 +189,27 @@ class PostgresPersistence:
         async with self._session_factory()() as session:
             session.add(AgentMessage(run_id=run_id, role=role, content=content))
             await session.commit()
+
+    async def add_job_event(self, stream_id: str, event: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        from services.api.db_models import JobEvent
+
+        async with self._session_factory()() as session:
+            session.add(JobEvent(stream_id=stream_id, event=event))
+            await session.commit()
+
+    async def latest_job_event_id(self) -> int:
+        from sqlalchemy import func, select
+        from services.api.db_models import JobEvent
+
+        async with self._session_factory()() as session:
+            return int((await session.execute(select(func.max(JobEvent.id)))).scalar() or 0)
+
+    async def job_events_after(self, after_id: int, limit: int = 500) -> list[tuple[int, str, dict[str, Any]]]:
+        from sqlalchemy import select
+        from services.api.db_models import JobEvent
+
+        async with self._session_factory()() as session:
+            rows = (await session.execute(select(JobEvent.id, JobEvent.stream_id, JobEvent.event).where(JobEvent.id > after_id).order_by(JobEvent.id).limit(limit))).all()
+        return [(int(row.id), str(row.stream_id), dict(row.event or {})) for row in rows]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -9,6 +10,31 @@ from pathlib import Path
 from typing import Any, Callable
 
 from packages.timeline_schema import Timeline, TimelineOp, apply_timeline_ops
+
+
+def load_project_media(project_dir: str | Path) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    """Read the asset manifests and transcripts the ingest job wrote.
+
+    Each ingested asset owns ``proxies/<asset_id>/`` with ``asset.json``
+    (written by ``ingest_asset``) and ``transcript.json``.
+    """
+
+    assets: dict[str, dict[str, Any]] = {}
+    transcripts: dict[str, list[dict[str, Any]]] = {}
+    for manifest in sorted(Path(project_dir).resolve().glob("proxies/*/asset.json")):
+        try:
+            asset = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        asset_id = str(asset.get("id") or manifest.parent.name)
+        assets[asset_id] = asset
+        transcript = manifest.parent / "transcript.json"
+        if transcript.is_file():
+            try:
+                transcripts[asset_id] = json.loads(transcript.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                transcripts[asset_id] = []
+    return assets, transcripts
 
 
 class ProjectToolService:
@@ -40,7 +66,10 @@ class ProjectToolService:
         temporary = self.timeline_path.with_suffix(".json.tmp")
         temporary.write_text(timeline.model_dump_json(indent=2), encoding="utf-8")
         temporary.replace(self.timeline_path)
-        return {"timeline": timeline.model_dump(mode="json"), "diff": diff, "version_id": str(abs(hash(timeline.model_dump_json()))) }
+        # hash() is salted per process; a content hash stays stable across
+        # worker restarts so the studio can compare versions.
+        version_id = hashlib.sha256(timeline.model_dump_json().encode()).hexdigest()[:16]
+        return {"timeline": timeline.model_dump(mode="json"), "diff": diff, "version_id": version_id}
 
     def list_assets(self) -> list[dict[str, Any]]:
         return list(self.assets.values())
@@ -133,7 +162,18 @@ class ProjectToolService:
     def ask_user(self, question: str, options: list[str]) -> dict[str, Any]:
         if not question.strip() or not options:
             raise ValueError("ask_user requires a question and at least one option")
-        return {"status": "needs_user", "question": question, "options": options}
+        record = {"question": question, "options": [str(option) for option in options]}
+        questions = self.project_dir / ".agent-context" / "questions.jsonl"
+        questions.parent.mkdir(parents=True, exist_ok=True)
+        with questions.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        # Runs are not interactive: the studio shows the question and the
+        # user's answer resumes this SDK session as a new turn.
+        return {
+            "status": "needs_user",
+            **record,
+            "instruction": "Stop here. End your turn with the question and options so the user can answer; their reply resumes this session.",
+        }
 
     def preview_composition(self, composition_path: str) -> dict[str, Any]:
         candidate = (self.project_dir / composition_path).resolve()

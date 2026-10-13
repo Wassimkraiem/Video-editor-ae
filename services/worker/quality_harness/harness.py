@@ -35,7 +35,9 @@ class AgentHarness:
     def sdk_options(self, *, can_use_tool: Callable[..., Any] | None = None) -> dict[str, object]:
         options = load_project_settings(self.project_dir)
         options.update(self.context.sdk_context_options())
-        options["system_prompt"] = AGENT_SYSTEM_PROMPT
+        # Append to the Claude Code preset so the agent keeps the built-in
+        # tool guidance (Skill, Bash, Edit) that skills rely on.
+        options["system_prompt"] = {"type": "preset", "preset": "claude_code", "append": AGENT_SYSTEM_PROMPT}
         if can_use_tool is not None:
             options["can_use_tool"] = can_use_tool
         return options

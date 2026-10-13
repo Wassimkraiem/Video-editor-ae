@@ -5,11 +5,14 @@ on:
     paths:
       - "services/worker/**"
       - "skills/**"
+      - "services/api/**"
+      - "apps/web/**"
+      - "tests/**"
       - "evals/**"
       - "scripts/run_quality_eval.py"
       - ".github/workflows/quality-evals.yml"
   push:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   contract:
@@ -32,3 +35,20 @@ jobs:
         with:
           name: quality-eval-results
           path: quality-eval-results.json
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit -p .
+      - run: npx vitest run
+      - run: npm run build

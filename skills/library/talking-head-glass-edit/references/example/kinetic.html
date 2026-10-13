@@ -1,0 +1,212 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <template>
+      <style>
+        @font-face {
+          font-family: "Kachabiti Display";
+          src: url("fonts/majallab.ttf") format("truetype");
+          font-weight: 700;
+          font-display: block;
+        }
+        @font-face {
+          font-family: "Kachabiti Sans";
+          src: url("fonts/segoeuib.ttf") format("truetype");
+          font-weight: 700;
+          font-display: block;
+        }
+        @font-face {
+          font-family: "Inter";
+          src: url("fonts/Inter-700-latin.woff2") format("woff2");
+          font-weight: 700;
+          font-display: block;
+        }
+        #kinetic {
+          position: absolute;
+          inset: 0;
+          overflow: hidden;
+          font-family: "Kachabiti Sans", sans-serif;
+        }
+        #k-panel {
+          position: absolute;
+          inset: 0;
+          overflow: hidden;
+        }
+        .k-beat {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 0;
+          bottom: 0;
+          opacity: 0;
+        }
+        .k-icon {
+          position: absolute;
+          left: 508px;
+          top: 1122px;
+          width: 64px;
+          height: 64px;
+          filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55));
+          fill: none;
+          stroke: #e9cf94;
+          stroke-width: 2;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+        }
+        .k-icon path,
+        .k-icon circle {
+          stroke-dasharray: 1;
+          stroke-dashoffset: 1;
+        }
+        .k-line {
+          position: absolute;
+          left: 40px;
+          right: 40px;
+          text-align: center;
+          direction: rtl;
+          overflow: hidden;
+          padding: 6px 0 16px;
+          text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6), 0 0 28px rgba(0, 0, 0, 0.35);
+        }
+        .k-ar {
+          top: 1190px;
+          font-family: "Kachabiti Display", serif;
+          font-weight: 700;
+          font-size: 86px;
+          line-height: 1.1;
+          color: #f4ede0;
+        }
+        .k-lat {
+          top: 1292px;
+          font-family: "Inter", sans-serif;
+          font-weight: 700;
+          font-size: 54px;
+          letter-spacing: 0.06em;
+          color: #e9cf94;
+          direction: ltr;
+        }
+        .k-ar2 {
+          top: 1280px;
+          font-family: "Kachabiti Display", serif;
+          font-weight: 700;
+          font-size: 98px;
+          line-height: 1.05;
+          color: #e9cf94;
+        }
+        .k-w {
+          display: inline-block;
+          margin: 0 9px;
+        }
+        .k-ch {
+          display: inline-block;
+        }
+        #k-cold {
+          top: 1262px;
+          font-size: 150px;
+          line-height: 1.05;
+          color: #d6eefb;
+        }
+        #k-strike {
+          position: absolute;
+          left: 420px;
+          width: 240px;
+          top: 1360px;
+          height: 6px;
+          border-radius: 3px;
+          box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+          background: #e9cf94;
+          transform-origin: 100% 50%;
+        }
+      </style>
+
+      <div id="kinetic" data-composition-id="kinetic" data-width="1080" data-height="1920">
+        <div id="k-panel">
+
+          <!-- A — نخرجو بيها en famille -->
+          <div id="k-a" class="k-beat">
+            <svg class="k-icon" viewBox="0 0 24 24"><circle pathLength="1" cx="7" cy="6" r="2.6" /><circle pathLength="1" cx="17" cy="6" r="2.6" /><circle pathLength="1" cx="12" cy="11.5" r="2" /><path pathLength="1" d="M2.5 20v-3.5A4.5 4.5 0 0 1 7 12h0a4.5 4.5 0 0 1 3 1.1M21.5 20v-3.5A4.5 4.5 0 0 0 17 12h0a4.5 4.5 0 0 0-3 1.1M8.8 20v-1.7a3.2 3.2 0 0 1 6.4 0V20" /></svg>
+            <div class="k-line k-ar"><span id="k-a1" class="k-w">نخرجو</span><span id="k-a2" class="k-w">بيها</span></div>
+            <div id="k-a3" class="k-line k-lat">EN FAMILLE</div>
+          </div>
+
+          <!-- B — نعملو camping -->
+          <div id="k-b" class="k-beat">
+            <svg class="k-icon" viewBox="0 0 24 24"><path pathLength="1" d="M12 3 2 21h20L12 3zM12 3l5.5 18M3.5 3.5 7 8M20.5 3.5 17 8" /></svg>
+            <div class="k-line k-ar"><span id="k-b1" class="k-w">نعملو</span></div>
+            <div id="k-b2" class="k-line k-lat">CAMPING</div>
+          </div>
+
+          <!-- C — نحوسو في الطبيعة -->
+          <div id="k-c" class="k-beat">
+            <svg class="k-icon" viewBox="0 0 24 24"><path pathLength="1" d="M12 2 6 10h3l-4 6h14l-4-6h3L12 2zM12 16v6" /></svg>
+            <div class="k-line k-ar"><span id="k-c1" class="k-w">نحوسو</span><span id="k-c2" class="k-w">في</span></div>
+            <div class="k-line k-ar2"><span id="k-c3" class="k-w">الطبيعة</span></div>
+          </div>
+
+          <!-- D — من غير ما نحسو البرد -->
+          <div id="k-d" class="k-beat">
+            <svg class="k-icon" viewBox="0 0 24 24" style="top: 1062px"><path pathLength="1" d="M12 2v20M3.3 7l17.4 10M3.3 17l17.4-10M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5" /></svg>
+            <div class="k-line k-ar" style="top: 1132px"><span id="k-d1" class="k-w">من</span><span id="k-d2" class="k-w">غير</span><span id="k-d3" class="k-w">ما</span><span id="k-d4" class="k-w">نحسو</span></div>
+            <div id="k-cold" class="k-line k-ar2"><span id="k-d5" class="k-w">البرد</span></div>
+            <div id="k-strike"></div>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        (function () {
+          const T0 = 11.7; // this sub-composition starts at 11.7s in the main timeline
+          const at = (t) => t - T0;
+          const q = (s) => "#kinetic " + s;
+          const tl = gsap.timeline({ paused: true });
+
+
+
+          // helpers
+          const beatIn = (b, t) => tl.fromTo(q(b), { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "none" }, at(t) - 0.12);
+          const beatOut = (b, t) => tl.to(q(b), { opacity: 0, y: -50, filter: "blur(10px)", duration: 0.4, ease: "power2.in" }, at(t));
+          const word = (w, t) => tl.fromTo(q(w), { yPercent: 110, opacity: 0, filter: "blur(8px)" },
+            { yPercent: 0, opacity: 1, filter: "blur(0px)", duration: 0.55, ease: "power3.out" }, at(t) - 0.05);
+          const draw = (b, t) => tl.fromTo(q(b + " .k-icon path, " + b + " .k-icon circle"), { strokeDashoffset: 1 },
+            { strokeDashoffset: 0, duration: 0.9, ease: "power2.inOut", stagger: 0.08 }, at(t));
+          const iconIn = (b, t) => tl.fromTo(q(b + " .k-icon"), { scale: 0.8, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.6, ease: "power2.out" }, at(t));
+          const letters = (id, text, t) => {
+            const el = document.querySelector("#kinetic " + id);
+            if (el) el.innerHTML = text.split("").map((c) => '<span class="k-ch">' + (c === " " ? "&nbsp;" : c) + "</span>").join("");
+            tl.fromTo(q(id + " .k-ch"), { opacity: 0, y: 40, filter: "blur(6px)" },
+              { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.45, ease: "power3.out", stagger: 0.035 }, at(t));
+          };
+
+          // A — 12.02 نخرجو · 12.62 بيها · 12.92 en famille
+          beatIn("#k-a", 12.02); iconIn("#k-a", 12.0); draw("#k-a", 12.05);
+          word("#k-a1", 12.02); word("#k-a2", 12.62); letters("#k-a3", "EN FAMILLE", 12.92);
+          beatOut("#k-a", 13.5);
+
+          // B — 13.74 نعملو · 14.10 camping
+          beatIn("#k-b", 13.74); iconIn("#k-b", 13.72); draw("#k-b", 13.76);
+          word("#k-b1", 13.74); letters("#k-b2", "CAMPING", 14.1);
+          beatOut("#k-b", 14.4);
+
+          // C — 14.56 نحوسو · 15.32 في · 15.46 الطبيعة
+          beatIn("#k-c", 14.56); iconIn("#k-c", 14.54); draw("#k-c", 14.6);
+          word("#k-c1", 14.56); word("#k-c2", 15.32); word("#k-c3", 15.46);
+          tl.fromTo(q("#k-c3"), { scale: 0.92 }, { scale: 1, duration: 1.2, ease: "sine.out", immediateRender: false }, at(15.46));
+          beatOut("#k-c", 15.85);
+
+          // D — 16.02 من · 16.18 غير · 16.38 ما · 16.48 نحسو · 16.82 البرد → struck through in gold
+          beatIn("#k-d", 16.02); iconIn("#k-d", 16.0); draw("#k-d", 16.04);
+          word("#k-d1", 16.02); word("#k-d2", 16.18); word("#k-d3", 16.38); word("#k-d4", 16.48);
+          word("#k-d5", 16.82);
+          tl.fromTo(q("#k-strike"), { scaleX: 0 }, { scaleX: 1, duration: 0.35, ease: "power2.inOut" }, at(17.02));
+          tl.to(q("#k-d5"), { color: "#6f8796", duration: 0.35, ease: "none" }, at(17.05));
+
+
+          window.__timelines["kinetic"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

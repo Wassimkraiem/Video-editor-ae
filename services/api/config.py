@@ -14,9 +14,14 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = 900
     refresh_token_ttl_seconds: int = 2_592_000
     max_upload_bytes: int = 1_073_741_824
+    anthropic_api_key: str = ""
+    # Alternative to an API key: a subscription token from `claude setup-token`.
+    claude_code_oauth_token: str = ""
     agent_model: str = "claude-opus-5-5"
     image_model: str = "gpt-image-1"
     style_extraction_enabled: bool = False
+    # Run jobs inside the API process when no Postgres queue is configured.
+    local_worker_enabled: bool = True
 
 
 @lru_cache

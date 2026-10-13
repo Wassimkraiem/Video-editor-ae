@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -187,3 +187,13 @@ class ExtractionJob(Base):
     urls: Mapped[list] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(30), default="queued")
     style_spec: Mapped[dict | None] = mapped_column(JSON)
+
+
+class JobEvent(Base):
+    """Progress events from workers, tailed by the API for its SSE streams."""
+
+    __tablename__ = "job_events"
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    stream_id: Mapped[str] = mapped_column(String(64), index=True)
+    event: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, is_dataclass, asdict
+from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .mcp_tools import create_project_mcp_server
 from .sandbox_policy import ProjectSandboxPolicy
-from .agent_tools import ProjectToolService
+from .agent_tools import ProjectToolService, load_project_media
 from .quality_harness.harness import AgentHarness
 from .quality_harness.sdk_runner import SDKRunConfig, make_claude_agent_options
 from .project_bootstrap import bootstrap_project
@@ -28,13 +28,31 @@ class AgentRunResult:
     usage: dict[str, Any]
 
 
+DOMAIN_TOOLS = [
+    "list_assets", "describe_asset", "get_timeline", "apply_timeline_ops",
+    "get_transcript", "search_transcript", "auto_cut_silence", "remove_filler_words",
+    "extract_frames", "render_preview", "render_final", "get_render_status",
+    "generate_image", "generate_voiceover", "ask_user", "preview_composition",
+]
+
+# Tools listed here are auto-approved by the CLI and never reach
+# ``can_use_tool``. Anything that writes files or runs commands (Bash, Write,
+# Edit, NotebookEdit) is deliberately left out so the sandbox policy sees it.
+AUTO_APPROVED_TOOLS = [
+    "Read", "Glob", "Grep", "TodoWrite",
+    *(f"mcp__video-editing__{name}" for name in DOMAIN_TOOLS),
+]
+
+
 def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
-    if is_dataclass(value):
-        return asdict(value)
+    if is_dataclass(value) and not isinstance(value, type):
+        # Keep the SDK class name (AssistantMessage, ToolUseBlock, ...) so
+        # the studio can render each message and block by kind.
+        return {"_type": type(value).__name__, **{item.name: _jsonable(getattr(value, item.name)) for item in fields(value)}}
     if isinstance(value, dict):
         return {str(k): _jsonable(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -70,6 +88,12 @@ def permission_callback(policy: ProjectSandboxPolicy):
     return can_use_tool
 
 
+async def _stream_prompt(prompt: str):
+    """Send the prompt in streaming mode, which ``can_use_tool`` requires."""
+
+    yield {"type": "user", "message": {"role": "user", "content": prompt}, "parent_tool_use_id": None}
+
+
 class AgentSessionRunner:
     def __init__(self, project_dir: str | Path, *, config: SDKRunConfig | None = None):
         self.project_dir = Path(project_dir).resolve()
@@ -83,32 +107,30 @@ class AgentSessionRunner:
         assets: dict[str, dict[str, Any]] | None = None,
         transcripts: dict[str, list[dict[str, Any]]] | None = None,
         event_sink: EventSink | None = None,
+        resume: str | None = None,
     ) -> AgentRunResult:
         try:
             from claude_agent_sdk import query
         except ImportError as exc:
             raise RuntimeError("claude-agent-sdk is required for agent runs; install the agent extra") from exc
 
-        service = ProjectToolService(self.project_dir, assets=assets, transcripts=transcripts)
         bootstrap_project(self.project_dir)
+        if assets is None and transcripts is None:
+            assets, transcripts = load_project_media(self.project_dir)
+        service = ProjectToolService(self.project_dir, assets=assets, transcripts=transcripts)
         mcp_server = create_project_mcp_server(service)
         policy = ProjectSandboxPolicy(self.project_dir)
         harness = AgentHarness(self.project_dir)
         base = harness.sdk_options(can_use_tool=permission_callback(policy))
         base.update({
-            "allowed_tools": [
-                "Read", "Write", "Edit", "Glob", "Grep", "Bash",
-                "mcp__video-editing__list_assets", "mcp__video-editing__describe_asset",
-                "mcp__video-editing__get_timeline", "mcp__video-editing__apply_timeline_ops",
-                "mcp__video-editing__get_transcript", "mcp__video-editing__search_transcript",
-                "mcp__video-editing__auto_cut_silence", "mcp__video-editing__remove_filler_words",
-                "mcp__video-editing__extract_frames", "mcp__video-editing__render_preview",
-                "mcp__video-editing__render_final", "mcp__video-editing__get_render_status",
-                "mcp__video-editing__generate_image", "mcp__video-editing__generate_voiceover",
-                "mcp__video-editing__ask_user", "mcp__video-editing__preview_composition",
-            ],
+            "allowed_tools": list(AUTO_APPROVED_TOOLS),
+            # Every skill copied into .claude/skills (wassim-style, the
+            # hyperframes family, ...) is listed to the model.
+            "skills": "all",
             "mcp_servers": {"video-editing": mcp_server},
         })
+        if resume:
+            base["resume"] = resume
         options = make_claude_agent_options(base, self.config, harness.hooks)
         messages: list[dict[str, Any]] = []
         events_path = self.project_dir / ".agent-context" / "events.jsonl"
@@ -118,7 +140,7 @@ class AgentSessionRunner:
 
         async def consume() -> None:
             nonlocal session_id, usage
-            async for message in query(prompt=prompt, options=options):
+            async for message in query(prompt=_stream_prompt(prompt), options=options):
                 payload = _jsonable(message)
                 if not isinstance(payload, dict):
                     payload = {"value": payload}
@@ -140,6 +162,9 @@ class AgentSessionRunner:
         except TimeoutError:
             await _emit(event_sink, {"type": "agent.failed", "reason": "wall_clock_timeout"})
             return AgentRunResult("failed", messages, session_id, {**usage, "reason": "wall_clock_timeout"})
-        status = "failed" if any(item.get("is_error") for item in messages) else "succeeded"
+        # Only the final ResultMessage decides the outcome; a tool error the
+        # agent recovered from must not fail the whole run.
+        result = next((item for item in reversed(messages) if item.get("_type") == "ResultMessage"), None)
+        status = "failed" if result is None or result.get("is_error") else "succeeded"
         await _emit(event_sink, {"type": f"agent.{status}", "session_id": session_id, "usage": usage})
         return AgentRunResult(status, messages, session_id, usage)

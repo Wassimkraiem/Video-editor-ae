@@ -30,6 +30,18 @@ def test_composition_and_render_are_blocked_until_storyboard_approval():
     assert registry.run("write_composition", composition_path="composition.html").ok
 
 
+def test_write_tool_only_gates_composition_html(tmp_path: Path):
+    registry = register_quality_hooks(QualityHookRegistry(), validator=FakeValidator(False))
+    assert registry.run("Write", file_path=str(tmp_path / "notes.md"), content="x").ok
+    assert registry.run("Write", file_path=str(tmp_path / "timeline.html"), content="x").ok
+    assert not registry.run("Write", file_path=str(tmp_path / "compositions" / "reel" / "index.html"), content="x").ok
+
+
+def test_queued_render_tools_pass_without_a_render_file():
+    registry = register_quality_hooks(QualityHookRegistry(), validator=FakeValidator(True))
+    assert registry.run("mcp__video-editing__render_preview").ok
+
+
 def test_plan_is_required_for_motion_and_multiple_scenes():
     assert requires_plan(scene_count=2)
     assert requires_plan(brief="new motion graphics title")

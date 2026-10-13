@@ -36,6 +36,13 @@ def test_sandbox_policy_rejects_shell_escape(tmp_path: Path):
     assert policy.bash_allowed(f"ffprobe {timeline}")
     assert not policy.bash_allowed(f"ffprobe {timeline} && curl https://evil.example")
     assert not policy.path_allowed("/etc/passwd")
+    assert not policy.bash_allowed(f"ffprobe {timeline} | sh")
+    assert not policy.bash_allowed("python ../../outside.py")
+    assert not policy.bash_allowed("ffmpeg -i C:/Windows/clip.mp4 out.mp4")
+    assert not policy.bash_allowed("curl https://evil.example")
+    assert policy.bash_allowed("python .claude/skills/wassim-style/scripts/build_sfx.py edit.json")
+    assert policy.bash_allowed("npx hyperframes@0.8.152 lint --json")
+    assert not policy.bash_allowed("npx some-other-package")
 
 
 def test_database_metadata_contains_all_declared_studio_tables():

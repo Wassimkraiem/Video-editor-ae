@@ -69,3 +69,13 @@ def current_user_id(
     if not token:
         raise HTTPException(status_code=401, detail="Authentication required")
     return str(decode_token(token)["sub"])
+
+
+def optional_user_id(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+) -> str | None:
+    """Like ``current_user_id`` but for routes that also accept signed URLs."""
+
+    token = credentials.credentials if credentials else request.headers.get("X-Access-Token")
+    return str(decode_token(token)["sub"]) if token else None

@@ -21,8 +21,9 @@ class StorageBackend(Protocol):
 
 
 class LocalStorage:
-    def __init__(self, root: str | Path, signing_secret: str | bytes = ""):
+    def __init__(self, root: str | Path, signing_secret: str | bytes = "", route: str = "/api/v1/media"):
         self.root = Path(root).resolve()
+        self.route = route.rstrip("/")
         self.signing_secret = signing_secret.encode() if isinstance(signing_secret, str) else signing_secret
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -69,10 +70,10 @@ class LocalStorage:
         # API callers receive a short-lived signed route; ownership is still
         # checked by the API before serving the object.
         if not self.signing_secret:
-            return f"/api/v1/media/{key}"
+            return f"{self.route}/{key}"
         expires = int(time.time()) + 900
         signature = hmac.new(self.signing_secret, f"{key}:{expires}".encode(), hashlib.sha256).hexdigest()
-        return f"/api/v1/media/{quote(key, safe='/')}?expires={expires}&signature={signature}"
+        return f"{self.route}/{quote(key, safe='/')}?expires={expires}&signature={signature}"
 
     def verify(self, key: str, expires: int, signature: str) -> bool:
         if not self.signing_secret or expires < int(time.time()):

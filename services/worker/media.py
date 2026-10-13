@@ -33,7 +33,12 @@ def audio_extract_command(input_path: str | Path, output_path: str | Path) -> FF
 def thumbnail_command(input_path: str | Path, output_pattern: str | Path, *, fps: float = 1 / 5) -> FFmpegCommand:
     if fps <= 0:
         raise ValueError("Thumbnail fps must be positive")
-    return FFmpegCommand(("ffmpeg", "-y", "-i", str(Path(input_path).resolve()), "-vf", f"fps={fps:g},scale=640:-2", str(Path(output_pattern).resolve())))
+    # select keeps the first frame and then one every 1/fps seconds, so clips
+    # shorter than the interval still get a thumbnail (fps= would emit none
+    # and make ffmpeg fail with an empty output).
+    interval = 1 / fps
+    select = f"select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{interval:g})',scale=640:-2"
+    return FFmpegCommand(("ffmpeg", "-y", "-i", str(Path(input_path).resolve()), "-vf", select, "-fps_mode", "vfr", str(Path(output_pattern).resolve())))
 
 
 def loudness_normalize_command(input_path: str | Path, output_path: str | Path) -> FFmpegCommand:

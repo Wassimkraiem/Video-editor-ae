@@ -1,58 +1,217 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AgentPanel, stylesFrom } from "../components/AgentPanel";
+import { AuthPanel } from "../components/AuthPanel";
+import { FilmIcon, LogoutIcon } from "../components/icons";
+import { PreviewPanel, type PreviewSource } from "../components/PreviewPanel";
 import { ProjectMemoryEditor } from "../components/ProjectMemoryEditor";
+import { AssetLibrary, ProjectList } from "../components/Sidebar";
 import { StoryboardPanel, type Storyboard } from "../components/StoryboardPanel";
-import { Button, Card, Input, Textarea } from "../components/ui";
-import { API_URL, api, setAccessToken, type Project, type Render, type Run } from "../lib/api-client";
-import { subscribeSSE, type ServerEvent } from "../lib/sse";
+import { TimelinePanel } from "../components/TimelinePanel";
+import { Badge, Spinner } from "../components/ui";
+import type { RunEvent } from "../lib/agent-events";
+import { API_URL, api, refreshSession, setAccessToken, type Asset, type Health, type Output, type Project, type Render, type Run, type Skill, type TimelineVersion } from "../lib/api-client";
+import { subscribeSSE } from "../lib/sse";
 
-const emptyStoryboard: Storyboard = { project_id: "", brief: "", status: "awaiting_approval", scenes: [] };
-
-function AuthPanel({ onAuthenticated }: { onAuthenticated: (token: string) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
-  const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
-  async function submit() {
-    setBusy(true); setError("");
-    try { const result = mode === "login" ? await api.login(email, password) : await api.register(email, password); onAuthenticated(result.access_token); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : "Authentication failed"); }
-    finally { setBusy(false); }
-  }
-  return <div className="mx-auto mt-24 max-w-md"><Card><p className="mb-2 text-xs uppercase tracking-[0.24em] text-violet-300">AI video studio</p><h1 className="text-2xl font-semibold">{mode === "login" ? "Welcome back" : "Create your studio account"}</h1><p className="mt-2 text-sm text-slate-300">Your access token stays in memory; media and provider keys stay on the server.</p><div className="mt-6 space-y-3"><Input type="email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} /><Input type="password" placeholder="Password (8+ characters)" value={password} onChange={(event) => setPassword(event.target.value)} /><Button className="w-full" onClick={() => void submit()} disabled={busy || !email || password.length < 8}>{busy ? "Connecting…" : mode === "login" ? "Sign in" : "Create account"}</Button>{error && <p className="text-sm text-red-300">{error}</p>}</div><button className="mt-4 text-sm text-violet-300 underline" onClick={() => setMode(mode === "login" ? "register" : "login")}>{mode === "login" ? "Create an account" : "Use an existing account"}</button></Card></div>;
-}
-
-function ProjectPicker({ projects, active, onSelect, onCreate }: { projects: Project[]; active?: string; onSelect: (id: string) => void; onCreate: (name: string, workflow: string) => Promise<void> }) {
-  const [name, setName] = useState(""); const [workflow, setWorkflow] = useState("raw-footage");
-  return <Card className="space-y-3"><div className="flex items-center justify-between"><h2 className="font-semibold">Projects</h2><span className="text-xs text-slate-400">{projects.length} total</span></div><div className="space-y-1">{projects.map((project) => <button key={project.id} onClick={() => onSelect(project.id)} className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${active === project.id ? "bg-accent/30 text-white" : "text-slate-300 hover:bg-white/5"}`}><span>{project.name}</span><span className="text-xs text-slate-500">{project.workflow}</span></button>)}</div><div className="border-t border-white/10 pt-3"><Input placeholder="New project name" value={name} onChange={(event) => setName(event.target.value)} /><select className="mt-2 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm" value={workflow} onChange={(event) => setWorkflow(event.target.value)}><option value="raw-footage">Raw footage edit</option><option value="motion-graphics">Motion graphics</option><option value="explainer">Explainer</option></select><Button className="mt-2 w-full" disabled={!name.trim()} onClick={() => { void onCreate(name.trim(), workflow); setName(""); }}>Create project</Button></div></Card>;
-}
-
-function TimelinePanel({ projectId }: { projectId?: string }) {
-  const [versions, setVersions] = useState<unknown[]>([]);
-  useEffect(() => { if (projectId) void api.timeline(projectId).then(setVersions).catch(() => setVersions([])); }, [projectId]);
-  const current = versions[versions.length - 1] as { data?: { duration_ms?: number; fps?: number; tracks?: { id: string; type: string; items?: { id: string; type: string; start_ms: number; end_ms: number }[] }[] } } | undefined;
-  const timeline = current?.data;
-  return <Card className="min-h-[280px]"><div className="flex items-center justify-between"><h2 className="font-semibold">Timeline</h2><span className="text-xs text-slate-400">{timeline ? `${timeline.fps ?? 30} fps · ${Math.round((timeline.duration_ms ?? 0) / 1000)}s` : "No project selected"}</span></div>{timeline?.tracks?.length ? <div className="mt-5 space-y-3">{timeline.tracks.map((track) => <div key={track.id}><div className="mb-1 flex justify-between text-xs uppercase tracking-wide text-slate-500"><span>{track.type}</span><span>{track.items?.length ?? 0} items</span></div><div className="relative h-10 rounded bg-black/30">{track.items?.map((item) => <div key={item.id} className="absolute inset-y-1 rounded bg-violet-500/70 px-2 py-1 text-xs" style={{ left: `${(item.start_ms / Math.max(timeline.duration_ms ?? 1, 1)) * 100}%`, width: `${((item.end_ms - item.start_ms) / Math.max(timeline.duration_ms ?? 1, 1)) * 100}%` }}>{item.type}</div>)}</div></div>)}</div> : <p className="mt-12 text-center text-sm text-slate-500">Upload footage or describe a piece to create timeline tracks.</p>}</Card>;
-}
-
-function AgentPanel({ projectId, token, onRun }: { projectId?: string; token: string; onRun: (run: Run) => void }) {
-  const [brief, setBrief] = useState(""); const [events, setEvents] = useState<ServerEvent<Record<string, unknown>>[]>([]); const [run, setRun] = useState<Run>(); const stop = useRef<(() => void) | undefined>(undefined);
-  useEffect(() => () => stop.current?.(), []);
-  async function start() {
-    if (!projectId || !brief.trim()) return;
-    const motion = /motion|animated|kinetic/i.test(brief); const next = await api.createRun(projectId, brief.trim(), motion ? 3 : 1, motion); setRun(next); onRun(next); setEvents([]); stop.current?.(); stop.current = subscribeSSE<Record<string, unknown>>(`${API_URL}/runs/${next.id}/events`, (event) => setEvents((old) => [...old, event]), undefined, token);
-  }
-  return <Card className="flex min-h-[440px] flex-col"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Agent</h2><p className="text-xs text-slate-400">Plan → inspect → edit → verify → review</p></div>{run && <span className="rounded-full bg-white/10 px-2 py-1 text-xs">{run.status}</span>}</div><div className="mt-4 flex-1 space-y-2 overflow-auto text-sm">{events.length === 0 && <p className="text-slate-500">Describe the edit you want. The agent will stream tool calls and approvals here.</p>}{events.map((event) => <div key={event.id} className="rounded-lg border border-white/10 bg-black/20 p-2"><span className="mr-2 text-xs text-violet-300">#{event.id}</span>{String(event.data.type ?? "event")}<pre className="mt-1 whitespace-pre-wrap text-xs text-slate-400">{JSON.stringify(event.data, null, 2)}</pre></div>)}</div><Textarea className="mt-3 min-h-20" placeholder="Cut pauses, remove filler words, add captions…" value={brief} onChange={(event) => setBrief(event.target.value)} /><Button className="mt-2" onClick={() => void start()} disabled={!projectId || !brief.trim()}>Run agent</Button></Card>;
-}
+const TURN_END = new Set(["agent.succeeded", "agent.failed", "run.cancelled"]);
 
 export default function StudioPage() {
-  const [token, setToken] = useState<string | null>(null); const [projects, setProjects] = useState<Project[]>([]); const [activeId, setActiveId] = useState<string>(); const [render, setRender] = useState<Render>(); const [storyboard, setStoryboard] = useState<Storyboard>(emptyStoryboard); const [eventsNotice, setEventsNotice] = useState("");
+  const [session, setSession] = useState<"booting" | "signed-out" | "signed-in">("booting");
+  const [email, setEmail] = useState("");
+  const [health, setHealth] = useState<Health>();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeId, setActiveId] = useState<string>();
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [outputs, setOutputs] = useState<Output[]>([]);
+  const [renders, setRenders] = useState<Render[]>([]);
+  const [timeline, setTimeline] = useState<TimelineVersion>();
+  const [run, setRun] = useState<Run>();
+  const [events, setEvents] = useState<RunEvent[]>([]);
+  const [storyboard, setStoryboard] = useState<Storyboard>();
+  const [preview, setPreview] = useState<PreviewSource>();
+  const latestOutput = useRef<string | undefined>(undefined);
+
   const active = useMemo(() => projects.find((project) => project.id === activeId), [projects, activeId]);
-  useEffect(() => { void import("@hyperframes/player"); }, []);
-  useEffect(() => { if (!token) return; setAccessToken(token); void api.projects().then((items) => { setProjects(items); setActiveId(items[0]?.id); }).catch(() => setProjects([])); }, [token]);
-  if (!token) return <AuthPanel onAuthenticated={(value) => { setAccessToken(value); setToken(value); }} />;
-  async function createProject(name: string, workflow: string) { const project = await api.createProject({ name, workflow }); setProjects((old) => [project, ...old]); setActiveId(project.id); }
-  async function upload(event: ChangeEvent<HTMLInputElement>) { const file = event.target.files?.[0]; if (file && activeId) { const asset = await api.uploadAsset(activeId, file); setEventsNotice(`Uploaded ${asset.filename}; ingest queued.`); } }
-  async function renderProject() { if (!activeId) return; setRender(await api.createRender(activeId, "preview")); }
-  return <main className="min-h-screen bg-ink"><header className="border-b border-white/10 px-6 py-4"><div className="mx-auto flex max-w-[1600px] items-center justify-between"><div><p className="text-xs uppercase tracking-[0.3em] text-violet-300">AI video editing studio</p><h1 className="text-xl font-semibold">{active?.name ?? "Choose a project"}</h1></div><div className="flex items-center gap-3"><label className="cursor-pointer rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5">Upload media<input className="hidden" type="file" accept="video/*,audio/*,image/*" onChange={(event) => void upload(event)} /></label><Button onClick={() => void renderProject()} disabled={!activeId}>Preview render</Button></div></div></header><div className="mx-auto grid max-w-[1600px] gap-4 p-6 lg:grid-cols-[250px_minmax(0,1fr)_360px]"><aside className="space-y-4"><ProjectPicker projects={projects} active={activeId} onSelect={setActiveId} onCreate={createProject} /><Card><h2 className="font-semibold">Asset library</h2><p className="mt-2 text-sm text-slate-400">Raw uploads, proxies, transcripts, generated images, and skills appear here after ingest.</p>{eventsNotice && <p className="mt-3 text-xs text-emerald-300">{eventsNotice}</p>}</Card></aside><section className="space-y-4"><Card className="flex min-h-[310px] items-center justify-center bg-black/40">{render?.output_url ? <hyperframes-player className="h-[280px] w-full" src={render.output_url} controls /> : <div className="text-center"><div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-500/20 text-2xl">▶</div><p className="font-medium">Preview player</p><p className="mt-1 text-sm text-slate-400">HyperFrames compositions and verified video renders play here.</p>{render && <p className="mt-3 text-xs text-emerald-300">Render {render.status}</p>}</div>}</Card><TimelinePanel projectId={activeId} /></section><aside className="space-y-4"><AgentPanel projectId={activeId} token={token} onRun={(run) => { if (run.status === "waiting_for_approval") setStoryboard({ ...emptyStoryboard, project_id: run.project_id, brief: run.brief, status: "awaiting_approval", scenes: [{ id: "scene-1", title: "Planned scene", start_ms: 0, end_ms: 3000, assets: [], template: "custom" }] }); }} />{storyboard.project_id && <StoryboardPanel storyboard={storyboard} onDecision={(decision) => setStoryboard({ ...storyboard, status: decision === "Approve" ? "approved" : "revision_requested" })} />}<ProjectMemoryEditor initialValue="# Project memory\n" onSave={async () => undefined} /></aside></div></main>;
+  const styles = useMemo(() => stylesFrom(skills), [skills]);
+
+  // Restore the session from the httpOnly refresh cookie on reload.
+  useEffect(() => {
+    void refreshSession().then((token) => setSession(token ? "signed-in" : "signed-out"));
+  }, []);
+
+  useEffect(() => {
+    if (session !== "signed-in") return;
+    void api.me().then((user) => setEmail(user.email)).catch(() => undefined);
+    void api.health().then(setHealth).catch(() => undefined);
+    void api.skills().then(setSkills).catch(() => setSkills([]));
+    void api.projects().then((items) => { setProjects(items); setActiveId((current) => current ?? items[0]?.id); }).catch(() => setProjects([]));
+  }, [session]);
+
+  const refreshOutputs = useCallback(async (projectId: string, autoplay = false) => {
+    const items = await api.outputs(projectId).catch(() => [] as Output[]);
+    setOutputs(items);
+    const newest = items[0];
+    if (newest && (autoplay || !latestOutput.current) && newest.path !== latestOutput.current) {
+      setPreview({ url: newest.url, title: newest.name, subtitle: newest.path.split("/").slice(0, -1).join("/") });
+    }
+    latestOutput.current = newest?.path;
+  }, []);
+
+  const refreshProject = useCallback(async (projectId: string) => {
+    await Promise.all([
+      api.assets(projectId).then(setAssets).catch(() => setAssets([])),
+      api.renders(projectId).then(setRenders).catch(() => setRenders([])),
+      api.timeline(projectId).then((versions) => setTimeline(versions[versions.length - 1])).catch(() => setTimeline(undefined)),
+      api.storyboard(projectId).then((board) => setStoryboard(board ?? undefined)).catch(() => setStoryboard(undefined)),
+      refreshOutputs(projectId),
+    ]);
+  }, [refreshOutputs]);
+
+  // Load everything for the selected project and follow its ingest events.
+  useEffect(() => {
+    if (session !== "signed-in" || !activeId) return;
+    setPreview(undefined);
+    latestOutput.current = undefined;
+    setRun(undefined);
+    setEvents([]);
+    void refreshProject(activeId);
+    void api.runs(activeId).then((runs) => setRun(runs[0])).catch(() => undefined);
+    return subscribeSSE<RunEvent>(`${API_URL}/projects/${activeId}/events`, ({ data }) => {
+      if (data.type.startsWith("ingest.")) void api.assets(activeId).then(setAssets).catch(() => undefined);
+    });
+  }, [session, activeId, refreshProject]);
+
+  // Stream the current run's conversation.
+  const runId = run?.id;
+  useEffect(() => {
+    if (!runId || !activeId) return;
+    setEvents([]);
+    return subscribeSSE<RunEvent>(`${API_URL}/runs/${runId}/events`, ({ id, data }) => {
+      setEvents((current) => (current.some((event) => event.id === id) ? current : [...current, { ...data, id }]));
+      if (data.type === "agent.message" || TURN_END.has(data.type)) void api.run(runId).then(setRun).catch(() => undefined);
+      if (TURN_END.has(data.type)) void refreshProject(activeId).then(() => refreshOutputs(activeId, true));
+    });
+  }, [runId, activeId, refreshProject, refreshOutputs]);
+
+  // Poll while a render is in flight.
+  const rendering = renders.some((render) => render.status === "queued" || render.status === "running");
+  useEffect(() => {
+    if (!rendering || !activeId) return;
+    const timer = setInterval(() => {
+      void api.renders(activeId).then((items) => {
+        setRenders(items);
+        if (!items.some((render) => render.status === "queued" || render.status === "running")) void refreshOutputs(activeId, true);
+      });
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [rendering, activeId, refreshOutputs]);
+
+  async function createProject(name: string, workflow: string) {
+    const project = await api.createProject({ name, workflow });
+    setProjects((current) => [project, ...current]);
+    setActiveId(project.id);
+  }
+
+  async function upload(files: File[]) {
+    if (!activeId) return;
+    for (const file of files) {
+      const asset = await api.uploadAsset(activeId, file);
+      setAssets((current) => [asset, ...current.filter((item) => item.id !== asset.id)]);
+    }
+  }
+
+  async function previewAsset(asset: Asset) {
+    const { url } = await api.assetUrl(asset.id);
+    setPreview({ url, title: asset.filename, subtitle: "source" });
+  }
+
+  async function startRun(brief: string, skill: string | null) {
+    if (!activeId) return;
+    const next = await api.createRun(activeId, { brief, skill });
+    setRun(next);
+    if (next.status === "waiting_for_approval") void api.storyboard(activeId).then((board) => setStoryboard(board ?? undefined)).catch(() => undefined);
+  }
+
+  async function reply(text: string) {
+    if (!run) return;
+    const result = await api.answerRun(run.id, text);
+    setRun({ ...run, status: result.status ?? run.status });
+    if (activeId) void api.storyboard(activeId).then((board) => setStoryboard(board ?? undefined)).catch(() => undefined);
+  }
+
+  async function cancel() {
+    if (run) setRun(await api.cancelRun(run.id));
+  }
+
+  async function signOut() {
+    await api.logout().catch(() => undefined);
+    setAccessToken(null);
+    setSession("signed-out");
+    setProjects([]);
+    setActiveId(undefined);
+  }
+
+  const loadMemory = useCallback((projectId: string) => api.memory(projectId).then((memory) => memory.content), []);
+  const saveMemory = useCallback(async (projectId: string, content: string) => { await api.saveMemory(projectId, content); }, []);
+
+  if (session === "booting") return <main className="flex min-h-screen items-center justify-center text-slate-500"><Spinner /></main>;
+  if (session === "signed-out") return <AuthPanel onAuthenticated={(token) => { setAccessToken(token); setSession("signed-in"); }} />;
+
+  return (
+    <main className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-10 border-b border-line bg-ink/80 backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-[1680px] items-center gap-4 px-4 lg:px-6">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white shadow-glow"><FilmIcon /></div>
+            <span className="text-sm font-semibold text-white">Studio</span>
+          </div>
+          <span className="text-slate-600">/</span>
+          <h1 className="min-w-0 truncate text-sm font-medium text-slate-200">{active?.name ?? "No project"}</h1>
+          {active && <Badge>{active.workflow.replace(/-/g, " ")}</Badge>}
+          <div className="ml-auto flex items-center gap-3">
+            {health && <Badge tone={health.agent_key_configured ? "success" : "warning"}>{health.worker === "local" ? "Local worker" : "Queue worker"}{health.agent_key_configured ? "" : " · no API key"}</Badge>}
+            {email && <span className="hidden text-xs text-slate-500 sm:inline">{email}</span>}
+            <button onClick={() => void signOut()} className="rounded-lg p-2 text-slate-400 transition hover:bg-white/[0.06] hover:text-white" aria-label="Sign out"><LogoutIcon /></button>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto grid w-full max-w-[1680px] flex-1 gap-4 p-4 lg:grid-cols-[260px_minmax(0,1fr)_400px] lg:p-6">
+        <aside className="space-y-4">
+          <ProjectList projects={projects} activeId={activeId} onSelect={setActiveId} onCreate={createProject} />
+          <AssetLibrary assets={assets} onUpload={upload} onPreview={(asset) => void previewAsset(asset)} disabled={!activeId} />
+        </aside>
+
+        <section className="min-w-0 space-y-4">
+          <PreviewPanel
+            source={preview}
+            outputs={outputs}
+            renders={renders}
+            onSelect={setPreview}
+            canRender={Boolean(activeId)}
+            onRender={() => { if (activeId) void api.createRender(activeId, "preview").then((render) => setRenders((current) => [render, ...current])); }}
+          />
+          <TimelinePanel version={timeline} />
+          {storyboard && storyboard.scenes.length > 0 && <StoryboardPanel storyboard={storyboard} />}
+          <ProjectMemoryEditor projectId={activeId} load={loadMemory} onSave={saveMemory} />
+        </section>
+
+        <aside className="min-w-0 lg:sticky lg:top-20 lg:h-[calc(100vh-6.5rem)]">
+          <AgentPanel
+            projectId={activeId}
+            run={run}
+            events={events}
+            styles={styles}
+            agentReady={health?.agent_key_configured ?? true}
+            onStart={startRun}
+            onReply={reply}
+            onCancel={cancel}
+            onNewRun={() => { setRun(undefined); setEvents([]); }}
+          />
+        </aside>
+      </div>
+    </main>
+  );
 }

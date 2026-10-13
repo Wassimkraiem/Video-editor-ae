@@ -8,19 +8,27 @@ project settings, budgets, and the PostToolUse gate callback.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import asyncio
+import os
 from typing import Any
 
 from .hooks import QualityHookRegistry, build_post_tool_use_hook
 
 
+def _env_number(name: str, default: float) -> float:
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class SDKRunConfig:
-    model: str = "claude-opus-5-5"
-    max_turns: int = 40
-    max_budget_usd: float = 10.0
-    wall_clock_timeout_s: int = 900
+    model: str = field(default_factory=lambda: os.getenv("AGENT_MODEL", "claude-opus-5-5"))
+    max_turns: int = field(default_factory=lambda: int(_env_number("AGENT_MAX_TURNS", 80)))
+    max_budget_usd: float = field(default_factory=lambda: _env_number("AGENT_MAX_BUDGET_USD", 10.0))
+    wall_clock_timeout_s: int = field(default_factory=lambda: int(_env_number("AGENT_TIMEOUT_S", 1800)))
 
 
 def build_sdk_options(
@@ -72,7 +80,10 @@ def make_claude_agent_options(
     from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
     options = build_sdk_options(base_options, config, post_tool_use=build_post_tool_use_hook(registry))
-    options["hooks"] = {"PostToolUse": [HookMatcher(matcher="render_preview|render_final|render|write_composition|composition_write", hooks=[options["hooks"]["PostToolUse"][0]])]}
+    # No matcher: MCP tools arrive as ``mcp__video-editing__render_final`` and
+    # compositions are written with Write/Edit, so the registry filters by
+    # normalized tool name instead of a brittle matcher string.
+    options["hooks"] = {"PostToolUse": [HookMatcher(matcher=None, hooks=[options["hooks"]["PostToolUse"][0]], timeout=180)]}
     return ClaudeAgentOptions(**options)
 
 

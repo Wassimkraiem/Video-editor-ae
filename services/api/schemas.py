@@ -93,8 +93,10 @@ class AssetURLResponse(BaseModel):
 
 class RunCreate(BaseModel):
     brief: str = Field(min_length=1)
-    scene_count: int = Field(default=1, ge=1)
+    scene_count: int = Field(default=1, ge=1, le=24)
     motion_graphics: bool = False
+    # Optional skill (e.g. "wassim-style") the agent is told to invoke.
+    skill: str | None = Field(default=None, max_length=80, pattern=r"^[a-z0-9][a-z0-9:_-]*$")
 
 
 class RunResponse(BaseModel):
@@ -102,13 +104,18 @@ class RunResponse(BaseModel):
     project_id: str
     status: str
     brief: str
+    skill: str | None = None
     sdk_session_id: str | None = None
     usage: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 
 class UserMessage(BaseModel):
-    answer: str
+    answer: str = Field(min_length=1, max_length=20_000)
+
+
+class MemoryUpdate(BaseModel):
+    content: str = Field(max_length=200_000)
 
 
 class RenderCreate(BaseModel):
@@ -124,7 +131,16 @@ class RenderResponse(BaseModel):
     status: str
     output_url: str | None = None
     verification: dict[str, Any] | None = None
+    error: str | None = None
     created_at: datetime
+
+
+class OutputResponse(BaseModel):
+    name: str
+    path: str
+    size_bytes: int
+    modified_at: datetime
+    url: str
 
 
 class DownloadResponse(BaseModel):

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+  </head>
+  <body>
+    <template>
+      <style>
+        @font-face {
+          font-family: "Edit Sans";
+          src: url("fonts/segoeuib.ttf") format("truetype");
+          font-weight: 700;
+          font-display: block;
+        }
+        #captions {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+        }
+        .cap-group {
+          position: absolute;
+          left: 60px;
+          right: 60px;
+          top: 918px;
+          display: flex;
+          flex-direction: row;
+          justify-content: center;
+          flex-wrap: wrap;
+          gap: 0 14px;
+          direction: rtl;
+          opacity: 0;
+        }
+        .cap-w {
+          display: inline-block;
+          font-family: "Edit Sans", sans-serif;
+          font-weight: 700;
+          font-size: 46px;
+          line-height: 1.35;
+          color: rgba(255, 255, 255, 0.72);
+          text-shadow: 0 2px 6px rgba(0, 0, 0, 0.55), 0 0 22px rgba(0, 0, 0, 0.35);
+        }
+        .cap-w.latin {
+          direction: ltr;
+          font-size: 40px;
+          letter-spacing: 0.01em;
+        }
+        .cap-w {
+          position: relative;
+        }
+        .cap-w.key {
+          margin: 0 10px;
+        }
+      </style>
+
+      <div id="captions" data-composition-id="captions" data-width="1080" data-height="1920"></div>
+
+      <script>
+        (function () {
+          const GROUPS = /*__GROUPS__*/[];
+          const root = document.querySelector("#captions");
+          const tl = gsap.timeline({ paused: true });
+          const GOLD = "#e9cf94";
+
+          GROUPS.forEach((g, gi) => {
+            const el = document.createElement("div");
+            el.className = "cap-group";
+            el.id = "cap-g" + gi;
+            g.w.forEach((w, wi) => {
+              const s = document.createElement("span");
+              s.className = "cap-w" + (w.latin ? " latin" : "") + (w.k ? " key" : "");
+              s.id = "cap-g" + gi + "-w" + wi;
+              s.textContent = w.t;
+              el.appendChild(s);
+            });
+            if (root) root.appendChild(el);
+
+            // group: soft rise + blur-in, soft exit
+            tl.fromTo(el, { opacity: 0, y: 14, filter: "blur(6px)" },
+              { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.22, ease: "power2.out" }, g.s);
+            tl.to(el, { opacity: 0, y: -8, filter: "blur(4px)", duration: 0.18, ease: "power2.in" }, g.e - 0.18);
+
+            // words: brighten when spoken; the active word glows gold, then settles to white
+            g.w.forEach((w, wi) => {
+              const sel = "#cap-g" + gi + "-w" + wi;
+              tl.fromTo(sel, { color: "rgba(255,255,255,0.72)", scale: 1 },
+                { color: GOLD, scale: 1.04, duration: 0.16, ease: "power1.out", immediateRender: false }, w.s);
+              if (w.k) {
+                // keyword: pops bigger and stays gold for the rest of the phrase
+                tl.to(sel, { scale: 1.18, duration: 0.4, ease: "power2.out" }, w.s + 0.02);
+                return;
+              }
+              const settle = Math.min(w.e, (g.w[wi + 1] ? g.w[wi + 1].s : w.e + 0.2));
+              tl.to(sel, { color: "#ffffff", scale: 1, duration: 0.2, ease: "power1.out" }, Math.max(settle, w.s + 0.14));
+            });
+          });
+
+          window.__timelines["captions"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>
