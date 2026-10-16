@@ -35,7 +35,9 @@ class MemoryRepository:
         self.project_skills: dict[tuple[str, str], bool] = {}
         self.images: dict[str, dict[str, Any]] = {}
         self.extractions: dict[str, dict[str, Any]] = {}
+        self.studios: dict[str, dict[str, Any]] = {}
         self.jobs: list[dict[str, Any]] = []
+        # Revoked (rotated or logged-out) refresh tokens.
         self.refresh_tokens: set[str] = set()
 
     def enqueue_job(self, job_type: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -85,10 +87,10 @@ class MemoryRepository:
         self.timelines[project_id].append(record)
         return record
 
-    def create_skill(self, name: str, description: str, scope: str, body: str) -> dict[str, Any]:
+    def create_skill(self, name: str, description: str, scope: str, body: str, *, fast: bool = False, engine: str | None = None) -> dict[str, Any]:
         skill_id = str(uuid4())
         checksum = hashlib.sha256(body.encode()).hexdigest()
-        record = {"id": skill_id, "name": name, "description": description, "scope": scope, "body": body, "checksum": checksum, "enabled": True, "scripts_approved": False}
+        record = {"id": skill_id, "name": name, "description": description, "scope": scope, "body": body, "checksum": checksum, "enabled": True, "scripts_approved": False, "fast": fast, "fast_engine": engine}
         self.skills[skill_id] = record
         return record
 

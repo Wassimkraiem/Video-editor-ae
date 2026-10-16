@@ -34,3 +34,21 @@ def test_project_authorization_is_enforced():
         project = client.post("/api/v1/projects", headers={"Authorization": f"Bearer {owner.json()['access_token']}"}, json={"name": "Private"})
         response = client.get(f"/api/v1/projects/{project.json()['id']}", headers={"Authorization": f"Bearer {other.json()['access_token']}"})
         assert response.status_code == 404
+
+
+def test_refresh_survives_restart_but_not_reuse():
+    with TestClient(app) as client:
+        client.post("/api/v1/auth/register", json={"email": "refresh@example.com", "password": "correct horse battery staple"})
+        old = client.cookies.get("refresh_token")
+        headers = {"X-CSRF-Token": client.cookies.get("csrf_token")}
+        repo.refresh_tokens.clear()  # an API restart forgets in-memory state
+        assert client.post("/api/v1/auth/refresh", headers=headers).status_code == 200
+        client.cookies.set("refresh_token", old)
+        assert client.post("/api/v1/auth/refresh", headers={"X-CSRF-Token": client.cookies.get("csrf_token")}).status_code == 401
+
+
+def test_cors_allows_every_method_the_studio_uses():
+    with TestClient(app) as client:
+        for method in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+            preflight = client.options("/api/v1/projects", headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": method})
+            assert preflight.status_code == 200, method

@@ -19,6 +19,20 @@ invoke that skill with the Skill tool and follow it. Run skill scripts by
 their project path (`python .claude/skills/<skill>/scripts/<script>.py`).
 The run is non-interactive: when a skill says to ask the user something that
 the brief does not answer, pick the skill's documented default and say so.
+Every upload is transcribed on ingest and the user may have corrected it:
+`proxies/<asset_id>/transcript.json` (also via the get_transcript tool) and
+`proxies/<asset_id>/words.json` (the skills' `edit/words.json` format) are the
+source of truth for wording and timing. Use them instead of re-transcribing:
+copy words.json into the skill's `edit/words.json` and never "fix" the user's
+spelling. Only run a transcribe script when no transcript exists.
+Transcription models are preinstalled: run the skills' transcribe scripts
+with their default model (faster-whisper large-v3) and never pass another
+`--model` or try to download one.
+The user may have the reel open in HyperFrames Studio. When they say "this",
+"the selected" or "the caption I clicked", read their selection instead of
+guessing: `npx hyperframes preview compositions/<name> --context --json
+--context-fields selection`. Studio saves hand edits into the same files, so
+re-read a file before changing it.
 Keep every file you create inside the project folder; `raw/` is read-only.
 Write HyperFrames projects under `compositions/<name>/` and final videos to
 `renders/`.

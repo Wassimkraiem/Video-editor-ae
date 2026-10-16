@@ -66,7 +66,24 @@ export function buildChat(events: RunEvent[]): ChatItem[] {
         if (event.status === "waiting_for_approval") items.push({ kind: "status", key: `${key}-plan`, tone: "info", text: "Storyboard ready: approve it to start the edit" });
         break;
       case "user.answer":
-        items.push({ kind: "user", key, text: String(event.answer ?? "") });
+        items.push({ kind: "user", key, text: String(event.answer ?? "") + (Array.isArray(event.resources) && event.resources.length ? `\n📎 ${event.resources.join(", ")}` : "") });
+        break;
+      case "fast.step": {
+        // One row per step: later updates of the same step replace it.
+        const step = String(event.step ?? key);
+        const tone = event.status === "failed" ? "error" : event.status === "done" ? "success" : "info";
+        const cost = typeof event.cost === "number" && event.cost > 0 ? `$${event.cost.toFixed(3)}` : undefined;
+        const row: ChatItem = { kind: "status", key: `fast-${step}`, tone, text: `${event.status === "running" ? "…" : ""}${String(event.label ?? step)}`, meta: event.status === "failed" ? short(event.detail, 400) : cost };
+        const existing = items.findIndex((item) => item.key === row.key);
+        if (existing >= 0) items[existing] = row;
+        else items.push(row);
+        break;
+      }
+      case "fast.plan":
+        if (event.notes) items.push({ kind: "assistant", key, text: String(event.notes) });
+        break;
+      case "agent.waiting":
+        items.push({ kind: "status", key, tone: "info", text: "Waiting for the clip's transcription to finish before editing" });
         break;
       case "run.cancelled":
         items.push({ kind: "status", key, tone: "error", text: "Run cancelled" });

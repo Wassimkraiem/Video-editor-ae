@@ -63,6 +63,19 @@ async def _run_postgres(worker_id: str, database_url: str) -> None:
     agent_lane = asyncio.Semaphore(1)
     running: set[asyncio.Task[None]] = set()
 
+    async def stop_when_cancelled(run_id: str, task: asyncio.Task[Any]) -> None:
+        # Stop in the studio only flips the run's status in Postgres; poll it
+        # so the agent session (and its spending) ends promptly.
+        while not task.done():
+            await asyncio.sleep(3)
+            try:
+                if await persistence.agent_run_status(run_id) == "cancelled":
+                    logger.info("agent_run_cancelled run_id=%s", run_id)
+                    task.cancel()
+                    return
+            except Exception:
+                logger.exception("cancel_poll_failed run_id=%s", run_id)
+
     async def execute(job: JobRecord) -> None:
         try:
             lane = agent_lane if job.type in NO_RETRY else None
@@ -70,7 +83,17 @@ async def _run_postgres(worker_id: str, database_url: str) -> None:
                 await lane.acquire()
             try:
                 logger.info("job_started id=%s type=%s", job.id, job.type)
-                await handle_job(job, context)
+                work = asyncio.create_task(handle_job(job, context))
+                watcher = asyncio.create_task(stop_when_cancelled(str(job.payload["run_id"]), work)) if job.type == "agent_run" else None
+                try:
+                    await work
+                except asyncio.CancelledError:
+                    if not (watcher and watcher.done()):
+                        raise  # the worker itself is shutting down
+                    await publish(str(job.payload["run_id"]), {"type": "agent.failed", "reason": "cancelled"})
+                finally:
+                    if watcher:
+                        watcher.cancel()
                 await queue.complete(job)
             finally:
                 if lane:

@@ -53,15 +53,19 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
 
 export type Project = { id: string; owner_id: string; name: string; workflow: string; profile: Record<string, unknown>; created_at: string; updated_at: string };
 export type AssetProbe = { sha256?: string; duration_ms?: number | null; width?: number | null; height?: number | null; fps?: number | null; has_audio?: boolean };
-export type Asset = { id: string; project_id: string; filename: string; kind: string; mime_type: string; size_bytes: number; storage_key: string; status: "uploaded" | "ready" | "failed" | string; probe?: AssetProbe; created_at: string };
+export type Asset = { id: string; project_id: string; filename: string; kind: string; mime_type: string; size_bytes: number; storage_key: string; status: "uploaded" | "ready" | "failed" | string; probe?: AssetProbe; thumbnail_url?: string | null; transcript_status?: "transcribing" | "cleaning" | "ready" | "failed" | null; transcript_language?: string | null; transcript_reviewed?: boolean; role?: "clip" | "resource" | string; created_at: string };
+export type TranscriptWord = { id: string; text: string; start_ms: number; end_ms: number; segment?: number };
+export type Transcript = { asset_id: string; words: TranscriptWord[]; language?: string | null; reviewed: boolean; status?: string | null };
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "waiting_for_approval" | "revision_requested";
-export type Run = { id: string; project_id: string; status: RunStatus | string; brief: string; skill?: string | null; sdk_session_id?: string | null; usage: Record<string, unknown>; created_at: string };
+export type Run = { id: string; project_id: string; status: RunStatus | string; brief: string; skill?: string | null; sdk_session_id?: string | null; usage: Record<string, unknown>; created_at: string; mode?: "fast" | "agent" | string; asset_id?: string | null };
 export type Render = { id: string; project_id: string; preset: string; status: string; output_url?: string | null; error?: string | null; created_at: string };
-export type Output = { name: string; path: string; size_bytes: number; modified_at: string; url: string };
-export type Skill = { id: string; name: string; description: string; scope: "builtin" | "library" | "user" | "project" | string; enabled: boolean };
+export type Output = { name: string; path: string; size_bytes: number; modified_at: string; url: string; composition?: string | null; skill?: string | null; title?: string | null };
+export type Skill = { id: string; name: string; description: string; scope: "builtin" | "library" | "user" | "project" | string; enabled: boolean; fast?: boolean; fast_engine?: "style" | "generic" | string | null };
 export type TimelineItem = { id: string; type: string; start_ms: number; end_ms: number; label?: string };
 export type TimelineTrack = { id: string; type: string; items?: TimelineItem[] };
-export type TimelineVersion = { version: number; data: { duration_ms?: number; fps?: number; width?: number; height?: number; tracks?: TimelineTrack[] } };
+export type TimelineVersion = { version: number; source?: string; data: { duration_ms?: number; fps?: number; width?: number; height?: number; tracks?: TimelineTrack[] } };
+export type StudioState = { status: "closed" | "starting" | "ready" | "failed"; url?: string | null; composition?: string | null; error?: string | null };
+export type StyleClone = { id: string; status: "queued" | "downloading" | "analyzing" | "completed" | "failed" | string; urls: string[]; name: string; notes: string; skill_name?: string | null; error?: string | null; created_at?: string | null };
 export type Health = { status: string; worker: "local" | "queue"; agent_key_configured: boolean };
 
 const json = (body: unknown) => JSON.stringify(body);
@@ -75,19 +79,27 @@ export const api = {
   projects: () => apiFetch<Project[]>("/projects"),
   createProject: (body: { name: string; workflow: string }) => apiFetch<Project>("/projects", { method: "POST", body: json(body) }),
   assets: (projectId: string) => apiFetch<Asset[]>(`/projects/${projectId}/assets`),
-  uploadAsset: (projectId: string, file: File) => { const body = new FormData(); body.append("file", file); return apiFetch<Asset>(`/projects/${projectId}/assets`, { method: "POST", body }); },
+  uploadAsset: (projectId: string, file: File, role: "clip" | "resource" = "clip") => { const body = new FormData(); body.append("file", file); body.append("role", role); return apiFetch<Asset>(`/projects/${projectId}/assets`, { method: "POST", body }); },
+  transcript: (assetId: string) => apiFetch<Transcript>(`/assets/${assetId}/transcript`),
+  saveTranscript: (assetId: string, words: TranscriptWord[], language: string | null) => apiFetch<Transcript>(`/assets/${assetId}/transcript`, { method: "PUT", body: json({ words, language }) }),
+  transcribe: (assetId: string, language: string | null, vocabulary = "") => apiFetch<{ status: string }>(`/assets/${assetId}/transcribe`, { method: "POST", body: json({ language, vocabulary }) }),
   assetUrl: (assetId: string) => apiFetch<{ url: string }>(`/assets/${assetId}/url`),
   runs: (projectId: string) => apiFetch<Run[]>(`/projects/${projectId}/runs`),
   run: (runId: string) => apiFetch<Run>(`/runs/${runId}`),
-  createRun: (projectId: string, body: { brief: string; skill?: string | null; scene_count?: number; motion_graphics?: boolean }) => apiFetch<Run>(`/projects/${projectId}/runs`, { method: "POST", body: json(body) }),
-  answerRun: (runId: string, answer: string) => apiFetch<{ accepted: boolean; status?: string }>(`/runs/${runId}/messages`, { method: "POST", body: json({ answer }) }),
+  createRun: (projectId: string, body: { brief: string; skill?: string | null; scene_count?: number; motion_graphics?: boolean; mode?: "fast" | "agent"; asset_id?: string | null; quick?: boolean; resources?: string[] }) => apiFetch<Run>(`/projects/${projectId}/runs`, { method: "POST", body: json(body) }),
+  answerRun: (runId: string, answer: string, resources: string[] = []) => apiFetch<{ accepted: boolean; status?: string }>(`/runs/${runId}/messages`, { method: "POST", body: json({ answer, resources }) }),
   cancelRun: (runId: string) => apiFetch<Run>(`/runs/${runId}/cancel`, { method: "POST" }),
   renders: (projectId: string) => apiFetch<Render[]>(`/projects/${projectId}/renders`),
-  createRender: (projectId: string, preset: string) => apiFetch<Render>(`/projects/${projectId}/renders`, { method: "POST", body: json({ preset }) }),
+  createRender: (projectId: string, preset: string, composition?: string | null) => apiFetch<Render>(`/projects/${projectId}/renders`, { method: "POST", body: json({ preset, composition: composition ?? null }) }),
   outputs: (projectId: string) => apiFetch<Output[]>(`/projects/${projectId}/outputs`),
+  compositionTimeline: (projectId: string) => apiFetch<TimelineVersion | null>(`/projects/${projectId}/timeline/composition`),
   timeline: (projectId: string) => apiFetch<TimelineVersion[]>(`/projects/${projectId}/timeline/versions`),
   memory: (projectId: string) => apiFetch<{ content: string }>(`/projects/${projectId}/memory`),
   saveMemory: (projectId: string, content: string) => apiFetch<{ content: string }>(`/projects/${projectId}/memory`, { method: "PUT", body: json({ content }) }),
   storyboard: (projectId: string) => apiFetch<import("../components/StoryboardPanel").Storyboard | null>(`/projects/${projectId}/storyboard`),
   skills: () => apiFetch<Skill[]>("/skills"),
+  studio: (projectId: string) => apiFetch<StudioState>(`/projects/${projectId}/studio`),
+  openStudio: (projectId: string, composition?: string | null) => apiFetch<StudioState>(`/projects/${projectId}/studio`, { method: "POST", body: json({ composition: composition ?? null }) }),
+  styleClones: () => apiFetch<StyleClone[]>("/style-extractions"),
+  cloneStyle: (body: { urls: string[]; name: string; notes?: string; base?: string | null }) => apiFetch<StyleClone>("/style-extractions", { method: "POST", body: json(body) }),
 };

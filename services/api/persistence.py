@@ -181,6 +181,32 @@ class PostgresPersistence:
             await session.execute(update(AgentRun).where(AgentRun.id == run_id).values(**values))
             await session.commit()
 
+    async def all_agent_runs_and_assets(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Rows created before the event log carried full records."""
+
+        from sqlalchemy import select
+        from services.api.db_models import AgentRun, Asset, Project
+
+        async with self._session_factory()() as session:
+            run_rows = (await session.execute(select(AgentRun, Project.created_at).join(Project, Project.id == AgentRun.project_id))).all()
+            asset_rows = (await session.execute(select(Asset))).scalars().all()
+        runs = [
+            {"id": run.id, "project_id": run.project_id, "status": run.status, "brief": run.brief, "skill": None, "sdk_session_id": run.sdk_session_id, "usage": {}, "created_at": run.started_at or created}
+            for run, created in run_rows
+        ]
+        assets = [
+            {"id": asset.id, "project_id": asset.project_id, "filename": asset.filename, "kind": asset.kind, "mime_type": asset.mime_type, "size_bytes": asset.size_bytes, "storage_key": asset.storage_key, "status": asset.status, "probe": asset.probe_json or {}, "created_at": asset.created_at}
+            for asset in asset_rows
+        ]
+        return runs, assets
+
+    async def agent_run_status(self, run_id: str) -> str | None:
+        from services.api.db_models import AgentRun
+
+        async with self._session_factory()() as session:
+            record = await session.get(AgentRun, run_id)
+        return None if record is None else record.status
+
     async def add_agent_message(self, run_id: str, role: str, content: dict[str, Any]) -> None:
         if not self.enabled:
             return

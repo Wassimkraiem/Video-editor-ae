@@ -13,4 +13,5 @@ os.environ["DATABASE_URL"] = "memory://"
 os.environ["STORAGE_ROOT"] = os.path.join(_root, "storage")
 os.environ["PROJECTS_ROOT"] = os.path.join(_root, "projects")
 os.environ["LOCAL_WORKER_ENABLED"] = "false"
+os.environ["STYLE_EXTRACTION_ENABLED"] = "true"
 os.environ.pop("ANTHROPIC_API_KEY", None)

@@ -78,12 +78,43 @@ class AssetResponse(BaseModel):
     storage_key: str
     status: str
     probe: dict[str, Any] | None = None
+    thumbnail_url: str | None = None
+    # "clip": footage to edit (transcribed). "resource": an image, logo, sound
+    # or b-roll the user attaches to an edit request (never transcribed).
+    role: str = "clip"
+    transcript_status: str | None = None
+    transcript_language: str | None = None
+    transcript_reviewed: bool = False
     created_at: datetime
+
+
+class TranscriptWordIn(BaseModel):
+    id: str = Field(min_length=1, max_length=40)
+    text: str = Field(max_length=200)
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    segment: int = Field(default=0, ge=0)
 
 
 class TranscriptResponse(BaseModel):
     asset_id: str
     words: list[dict[str, Any]] = Field(default_factory=list)
+    language: str | None = None
+    reviewed: bool = False
+    status: str | None = None
+
+
+class TranscriptUpdate(BaseModel):
+    words: list[TranscriptWordIn] = Field(max_length=50_000)
+    language: str | None = Field(default=None, max_length=12)
+
+
+class TranscribeRequest(BaseModel):
+    # "tn" (Tunisian: Darija + French + English, the default), an ISO code
+    # such as "ar", "fr", "en", or "auto" to let Whisper detect it.
+    language: str | None = Field(default=None, max_length=12, pattern=r"^([a-z]{2,3}|auto)$")
+    # Names and terms to spell the speaker's way (brands, tools, people).
+    vocabulary: str = Field(default="", max_length=1000)
 
 
 class AssetURLResponse(BaseModel):
@@ -97,6 +128,14 @@ class RunCreate(BaseModel):
     motion_graphics: bool = False
     # Optional skill (e.g. "wassim-style") the agent is told to invoke.
     skill: str | None = Field(default=None, max_length=80, pattern=r"^[a-z0-9][a-z0-9:_-]*$")
+    # "fast": one planning call + the style's scripts (cents). "agent": the
+    # full Claude Code agent (dollars) for requests the engine can't express.
+    mode: Literal["fast", "agent"] = "fast"
+    asset_id: str | None = Field(default=None, max_length=64)
+    # Fast mode only: skip the speaker cut-out (no head pop-out, much quicker).
+    quick: bool = False
+    # Resource asset ids (images, logos, sounds) to use in this edit.
+    resources: list[str] = Field(default_factory=list, max_length=20)
 
 
 class RunResponse(BaseModel):
@@ -105,6 +144,7 @@ class RunResponse(BaseModel):
     status: str
     brief: str
     skill: str | None = None
+    mode: str = "agent"
     sdk_session_id: str | None = None
     usage: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -112,6 +152,7 @@ class RunResponse(BaseModel):
 
 class UserMessage(BaseModel):
     answer: str = Field(min_length=1, max_length=20_000)
+    resources: list[str] = Field(default_factory=list, max_length=20)
 
 
 class MemoryUpdate(BaseModel):
@@ -120,6 +161,7 @@ class MemoryUpdate(BaseModel):
 
 class RenderCreate(BaseModel):
     preset: Literal["preview", "1080p30", "1080p60", "4K", "9:16", "1:1"] = "preview"
+    composition: str | None = Field(default=None, max_length=300, pattern=r"^compositions/[A-Za-z0-9._-]+$")
     brief: str | None = None
     frame_extracts: list[str] = Field(default_factory=list)
 
@@ -141,6 +183,14 @@ class OutputResponse(BaseModel):
     size_bytes: int
     modified_at: datetime
     url: str
+    # The HyperFrames reel it was rendered from (opens in Studio).
+    composition: str | None = None
+    skill: str | None = None
+    title: str | None = None
+
+
+class StudioOpen(BaseModel):
+    composition: str | None = Field(default=None, max_length=300, pattern=r"^compositions/[A-Za-z0-9._-]+$")
 
 
 class DownloadResponse(BaseModel):
@@ -180,6 +230,10 @@ class SkillResponse(BaseModel):
     enabled: bool
     scripts_approved: bool
     checksum: str
+    # Every style runs as a cheap fast edit: "style" = its own engine
+    # (fast.json), "generic" = one call writes the whole composition.
+    fast: bool = False
+    fast_engine: str | None = None
 
 
 class ImageCreate(BaseModel):
@@ -200,11 +254,22 @@ class GeneratedImageResponse(BaseModel):
 
 
 class StyleExtractionCreate(BaseModel):
-    urls: list[str] = Field(min_length=1)
+    # One or more entries; each may hold several URLs separated by commas.
+    urls: list[str] = Field(min_length=1, max_length=10)
+    name: str = Field(min_length=2, max_length=63)
+    notes: str = Field(default="", max_length=4000)
+    # A house style to fork ("wassim-style", ...); empty lets the agent pick.
+    base: str | None = Field(default=None, max_length=63)
 
 
 class StyleExtractionResponse(BaseModel):
     id: str
     status: str
     urls: list[str]
+    name: str = ""
+    notes: str = ""
+    base: str | None = None
+    skill_name: str | None = None
+    error: str | None = None
+    created_at: datetime | None = None
     style_spec: dict[str, Any] | None = None

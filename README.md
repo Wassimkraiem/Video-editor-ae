@@ -50,9 +50,15 @@ uploads and project workspaces in `.local/`.
 ## Run with Docker (Postgres + separate worker)
 
 ```bash
-cp .env.example .env
-docker compose -f infra/docker-compose.yml up --build
+cp .env.example .env              # set ANTHROPIC_API_KEY and WHISPER_MODELS_HOST_DIR
+python scripts/fetch_models.py    # once: faster-whisper large-v3 into ~/.cache/fw-large-v3
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build
 ```
+
+The worker mounts `WHISPER_MODELS_HOST_DIR` read-only at `/models`, or your
+`~/.cache` when it is unset (Compose reads variables only from a `.env` beside
+the compose file, so `--env-file .env` is what makes a custom path apply).
+Edits never download speech models; a missing model fails fast instead.
 
 Then open http://localhost:3000. FastAPI docs are at http://localhost:8000/docs.
 

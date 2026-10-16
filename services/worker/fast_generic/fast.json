@@ -1,0 +1,10 @@
+{
+  "about": "Generic fast engine for any style without its own fast.json: one Claude call writes the whole HyperFrames composition from the style's SKILL.md; lint gates it and a failure goes back for a repair. See services/worker/fast_edit.py.",
+  "setup": [["python", "{skill}/prep.py", "{clip}"]],
+  "ready_when": ["assets/source.mp4", "edit/footage.json"],
+  "plan_files": {
+    "composition": {"path": "index.html", "format": "text", "doc": "the complete index.html of the edit: a standalone HyperFrames composition following ENGINE.md, in the look, pacing and motion the style's SKILL.md describes"}
+  },
+  "build": [["python", "{skill}/check.py"]],
+  "spec": ["@style/SKILL.md", "ENGINE.md"]
+}

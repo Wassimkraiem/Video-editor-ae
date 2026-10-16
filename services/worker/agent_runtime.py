@@ -44,6 +44,27 @@ AUTO_APPROVED_TOOLS = [
 ]
 
 
+MAX_EVENT_STRING = 20_000
+
+
+def compact_for_events(value: Any) -> Any:
+    """Drop inline image data and cap long strings before a message is stored.
+
+    Events go to SSE, events.jsonl and Postgres; base64 frames would bloat all
+    three and the studio never renders them.
+    """
+
+    if isinstance(value, dict):
+        if value.get("type") == "image" or value.get("_type") == "ImageBlock":
+            return {key: ("[image omitted]" if key in {"source", "data"} else compact_for_events(item)) for key, item in value.items()}
+        return {key: compact_for_events(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [compact_for_events(item) for item in value]
+    if isinstance(value, str) and len(value) > MAX_EVENT_STRING:
+        return value[:MAX_EVENT_STRING] + f"… [{len(value) - MAX_EVENT_STRING} more characters]"
+    return value
+
+
 def _jsonable(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -108,6 +129,7 @@ class AgentSessionRunner:
         transcripts: dict[str, list[dict[str, Any]]] | None = None,
         event_sink: EventSink | None = None,
         resume: str | None = None,
+        skills: list[str] | str = "all",
     ) -> AgentRunResult:
         try:
             from claude_agent_sdk import query
@@ -126,7 +148,7 @@ class AgentSessionRunner:
             "allowed_tools": list(AUTO_APPROVED_TOOLS),
             # Every skill copied into .claude/skills (wassim-style, the
             # hyperframes family, ...) is listed to the model.
-            "skills": "all",
+            "skills": skills,
             "mcp_servers": {"video-editing": mcp_server},
         })
         if resume:
@@ -141,7 +163,7 @@ class AgentSessionRunner:
         async def consume() -> None:
             nonlocal session_id, usage
             async for message in query(prompt=_stream_prompt(prompt), options=options):
-                payload = _jsonable(message)
+                payload = compact_for_events(_jsonable(message))
                 if not isinstance(payload, dict):
                     payload = {"value": payload}
                 payload["received_at"] = datetime.now(timezone.utc).isoformat()

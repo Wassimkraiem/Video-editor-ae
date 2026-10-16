@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -51,17 +51,24 @@ from .schemas import (
     UserResponse,
     MemoryUpdate,
     OutputResponse,
+    StudioOpen,
+    TranscribeRequest,
+    TranscriptUpdate,
 )
 from .security import create_token, current_user_id, hash_password, optional_user_id, verify_password, decode_token
 from .storage import LocalStorage, sniff_mime
 from .local_worker import LocalJobRunner
-from .event_state import record_event
+from .event_state import record_event, register_user_skill
+from .composition_timeline import composition_timeline
 from .queue import enqueue_postgres_job
 from .persistence import PostgresPersistence
 from services.worker.skill_parser import validate_skill_archive
-from services.worker.style_extraction import validate_user_urls
+from services.worker.style_extraction import BASE_STYLES, slugify_skill_name, split_urls, validate_user_urls
 from .rate_limit import expensive_rate_limit
 from services.worker.quality_harness.models import ProjectProfile
+from services.worker.fast_edit import fast_engine, skill_supports_fast
+from services.worker.catalog import composition_for, composition_meta, output_files, read_catalog
+from services.worker.transcription import write_transcript
 from services.worker.project_bootstrap import SKILL_SOURCES, SKILLS_ROOT, bootstrap_project
 from services.worker.quality_harness.project_memory import create_project_memory
 from services.worker.quality_harness.models import Storyboard, StoryScene
@@ -92,7 +99,41 @@ def export_agent_environment() -> None:
             os.environ[name] = value
 
 
-async def tail_job_events() -> None:
+# Events this API process applied itself before writing them to Postgres;
+# the tail skips them so they are not applied twice.
+_published_here: set[str] = set()
+
+
+async def publish_event(stream_id: str, event: dict[str, Any]) -> None:
+    """Apply an event now and, with Postgres, add it to the durable log.
+
+    The log is the source of truth for chats, uploads and renders: replaying
+    it on startup rebuilds them (see ``apply_event``).
+    """
+
+    if not database.enabled:
+        record_event(repo, stream_id, event)
+        return
+    event = json.loads(json.dumps({**event, "eid": str(uuid4())}, default=str))
+    _published_here.add(event["eid"])
+    record_event(repo, stream_id, event)
+    await database.add_job_event(stream_id, event)
+
+
+async def replay_job_events(after: int = 0) -> int:
+    """Apply every logged event after ``after``; returns the last id seen."""
+
+    while rows := await database.job_events_after(after, limit=2000):
+        for event_id, stream_id, event in rows:
+            after = event_id
+            if event.get("eid") in _published_here:
+                _published_here.discard(event["eid"])
+                continue
+            record_event(repo, stream_id, event)
+    return after
+
+
+async def tail_job_events(after: int) -> None:
     """Mirror events that worker containers write to Postgres.
 
     Workers run in another process, so their progress arrives through the
@@ -100,19 +141,16 @@ async def tail_job_events() -> None:
     and applied to the asset, run or render it describes.
     """
 
-    after = await database.latest_job_event_id()
     while True:
         try:
-            rows = await database.job_events_after(after)
+            last = await replay_job_events(after)
         except Exception:
             logger.exception("job_event_tail_failed")
             await asyncio.sleep(2)
             continue
-        for event_id, stream_id, event in rows:
-            after = event_id
-            record_event(repo, stream_id, event)
-        if not rows:
+        if last == after:
             await asyncio.sleep(0.5)
+        after = last
 
 
 @asynccontextmanager
@@ -120,7 +158,14 @@ async def lifespan(_: FastAPI):
     global local_runner
     tail: asyncio.Task[None] | None = None
     if database.enabled:
-        tail = asyncio.create_task(tail_job_events())
+        # Rebuild chats, uploads and renders before serving requests: rows
+        # first (older runs predate full-record events), then the event log.
+        runs, assets = await database.all_agent_runs_and_assets()
+        for record in runs:
+            repo.runs.setdefault(record["id"], record)
+        for record in assets:
+            repo.assets.setdefault(record["id"], record)
+        tail = asyncio.create_task(tail_job_events(await replay_job_events()))
     elif settings.local_worker_enabled:
         export_agent_environment()
         local_runner = LocalJobRunner(repo, settings.projects_root, settings.storage_root)
@@ -140,7 +185,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.web_origin],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "X-CSRF-Token"],
 )
 
@@ -167,12 +212,29 @@ def seed_builtin_skills() -> None:
             try:
                 text = skill_path.read_text(encoding="utf-8")
                 metadata = yaml.safe_load(text.split("---", 2)[1]) or {}
-                repo.create_skill(str(metadata["name"]), " ".join(str(metadata["description"]).split()), scope, text)
+                engine = fast_engine(skill_path.parent)
+                repo.create_skill(str(metadata["name"]), " ".join(str(metadata["description"]).split()), scope, text, fast=engine is not None, engine=engine)
             except (OSError, KeyError, ValueError, IndexError, yaml.YAMLError):
                 logger.exception("builtin_skill_seed_failed", extra={"path": str(skill_path)})
 
 
 seed_builtin_skills()
+
+
+def seed_user_skills() -> None:
+    """Styles cloned earlier live in <projects root>/_skills."""
+
+    from services.worker.style_extraction import skill_summary, user_skills_root
+
+    root = user_skills_root(Path(settings.projects_root))
+    for skill_dir in sorted(root.glob("*/")) if root.is_dir() else []:
+        try:
+            register_user_skill(repo, skill_summary(skill_dir))
+        except (OSError, ValueError):
+            logger.exception("user_skill_seed_failed", extra={"path": str(skill_dir)})
+
+
+seed_user_skills()
 
 
 @app.exception_handler(HTTPException)
@@ -327,7 +389,6 @@ async def register(payload: UserCreate, response: Response):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     access = create_token(user["id"], "access", settings.access_token_ttl_seconds)
     refresh = create_token(user["id"], "refresh", settings.refresh_token_ttl_seconds)
-    repo.refresh_tokens.add(refresh)
     set_auth_cookies(response, refresh)
     return TokenResponse(access_token=access)
 
@@ -340,7 +401,6 @@ async def login(payload: UserLogin, response: Response):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     access = create_token(user["id"], "access", settings.access_token_ttl_seconds)
     refresh = create_token(user["id"], "refresh", settings.refresh_token_ttl_seconds)
-    repo.refresh_tokens.add(refresh)
     set_auth_cookies(response, refresh)
     return TokenResponse(access_token=access)
 
@@ -351,13 +411,14 @@ async def refresh(request: Request, response: Response):
     token = request.cookies.get("refresh_token")
     if not token:
         raise HTTPException(status_code=401, detail="Refresh token required")
-    if token not in repo.refresh_tokens:
+    # Signed refresh tokens stay valid across API restarts; only tokens that
+    # were rotated or logged out in this process are refused.
+    if token in repo.refresh_tokens:
         raise HTTPException(status_code=401, detail="Refresh token has already been rotated")
     user_id = str(decode_token(token, "refresh")["sub"])
-    repo.refresh_tokens.remove(token)
+    repo.refresh_tokens.add(token)
     access = create_token(user_id, "access", settings.access_token_ttl_seconds)
     rotated = create_token(user_id, "refresh", settings.refresh_token_ttl_seconds)
-    repo.refresh_tokens.add(rotated)
     set_auth_cookies(response, rotated)
     return TokenResponse(access_token=access)
 
@@ -366,7 +427,7 @@ async def refresh(request: Request, response: Response):
 async def logout(request: Request, response: Response):
     require_csrf(request)
     if token := request.cookies.get("refresh_token"):
-        repo.refresh_tokens.discard(token)
+        repo.refresh_tokens.add(token)
     response.delete_cookie("refresh_token")
     response.delete_cookie("csrf_token")
 
@@ -431,6 +492,31 @@ async def timeline_versions(project_id: str, user_id: str = Depends(current_user
     return repo.timelines[project_id]
 
 
+@app.get("/api/v1/projects/{project_id}/studio")
+async def studio_state(project_id: str, user_id: str = Depends(current_user_id)):
+    await require_project_access(project_id, user_id)
+    return repo.studios.get(project_id) or {"status": "closed"}
+
+
+@app.post("/api/v1/projects/{project_id}/studio", status_code=202)
+async def open_studio(project_id: str, payload: StudioOpen | None = None, user_id: str = Depends(current_user_id)):
+    """Start HyperFrames Studio, the hand-editing timeline, on a reel (the latest by default)."""
+
+    await require_project_access(project_id, user_id)
+    composition = payload.composition if payload else None
+    repo.studios[project_id] = {"status": "starting", "composition": composition}
+    await enqueue_job("studio_open", {"project_id": project_id, "composition": composition})
+    return repo.studios[project_id]
+
+
+@app.get("/api/v1/projects/{project_id}/timeline/composition")
+async def composition_timeline_view(project_id: str, user_id: str = Depends(current_user_id)):
+    """The latest HyperFrames composition as tracks, or null when there is none."""
+
+    await require_project_access(project_id, user_id)
+    return composition_timeline(project_dir(project_id))
+
+
 @app.post("/api/v1/projects/{project_id}/timeline/versions", response_model=TimelineVersionResponse, status_code=201)
 async def create_timeline_version(project_id: str, payload: TimelineVersionCreate, user_id: str = Depends(current_user_id)):
     await require_project_access(project_id, user_id)
@@ -458,30 +544,53 @@ async def restore_timeline_version(project_id: str, version: int, user_id: str =
 
 
 @app.post("/api/v1/projects/{project_id}/assets", response_model=AssetResponse, status_code=201, dependencies=[Depends(expensive_rate_limit)])
-async def upload_asset(project_id: str, file: UploadFile = File(...), user_id: str = Depends(current_user_id)):
+async def upload_asset(project_id: str, file: UploadFile = File(...), role: str = Form("clip"), user_id: str = Depends(current_user_id)):
     await require_project_access(project_id, user_id)
+    if role not in {"clip", "resource"}:
+        raise HTTPException(status_code=422, detail="role must be clip or resource")
     try:
         sample = file.file.read(4096)
         file.file.seek(0)
         mime_type = sniff_mime(file.filename or "upload", file.content_type, sample)
-        key = f"projects/{project_id}/raw/{uuid4()}-{Path(file.filename or 'upload').name}"
+        # The folder records the role, so it survives every replay path.
+        key = f"projects/{project_id}/{'resources' if role == 'resource' else 'raw'}/{uuid4()}-{Path(file.filename or 'upload').name}"
         size, checksum = storage.put_stream(key, file.file, settings.max_upload_bytes)
     except ValueError as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
-    asset = {"id": str(uuid4()), "project_id": project_id, "filename": Path(file.filename or "upload").name, "kind": mime_type.split("/", 1)[0], "mime_type": mime_type, "size_bytes": size, "storage_key": key, "status": "uploaded", "probe": {"sha256": checksum}, "created_at": now()}
+    asset = {"id": str(uuid4()), "project_id": project_id, "filename": Path(file.filename or "upload").name, "kind": mime_type.split("/", 1)[0], "mime_type": mime_type, "size_bytes": size, "storage_key": key, "status": "uploaded", "probe": {"sha256": checksum}, "role": role, "created_at": now()}
     repo.assets[asset["id"]] = asset
     if database.enabled:
         await database.create_asset(asset)
-    await enqueue_job("ingest", {"asset_id": asset["id"], "project_id": project_id, "storage_key": key, "filename": asset["filename"], "mime_type": mime_type})
-    repo.append_event(project_id, {"type": "asset.uploaded", "asset_id": asset["id"], "filename": asset["filename"]})
+    await enqueue_job("ingest", {"asset_id": asset["id"], "project_id": project_id, "storage_key": key, "filename": asset["filename"], "mime_type": mime_type, "role": role})
+    await publish_event(project_id, {"type": "asset.uploaded", "asset_id": asset["id"], "filename": asset["filename"], "record": asset})
     return asset
 
 
 @app.get("/api/v1/projects/{project_id}/assets", response_model=list[AssetResponse])
 async def list_assets(project_id: str, user_id: str = Depends(current_user_id)):
     await require_project_access(project_id, user_id)
-    assets = [asset for asset in repo.assets.values() if asset["project_id"] == project_id]
-    return sorted(assets, key=lambda asset: asset["created_at"], reverse=True)
+    assets = [with_thumbnail(asset) for asset in repo.assets.values() if asset["project_id"] == project_id]
+    return sorted(assets, key=lambda asset: str(asset["created_at"]), reverse=True)
+
+
+def asset_role(asset: dict[str, Any]) -> str:
+    return "resource" if "/resources/" in str(asset.get("storage_key", "")) else "clip"
+
+
+def attached_resources(project_id: str, ids: list[str]) -> list[str]:
+    """Keep only resource assets of this project, in the order given."""
+
+    return [asset_id for asset_id in dict.fromkeys(ids) if (asset := repo.assets.get(asset_id)) and asset["project_id"] == project_id]
+
+
+def with_thumbnail(asset: dict[str, Any]) -> dict[str, Any]:
+    """Point at the first frame ingest extracted, when there is one."""
+
+    asset = {**asset, "role": asset_role(asset)}
+    relative = f"proxies/{asset['id']}/thumbnails/00001.jpg"
+    if (project_dir(asset["project_id"]) / relative).is_file():
+        return {**asset, "thumbnail_url": project_files.url(f"{asset['project_id']}/{relative}")}
+    return asset
 
 
 async def asset_for(asset_id: str, user_id: str) -> dict[str, Any]:
@@ -494,18 +603,48 @@ async def asset_for(asset_id: str, user_id: str) -> dict[str, Any]:
 
 @app.get("/api/v1/assets/{asset_id}", response_model=AssetResponse)
 async def get_asset(asset_id: str, user_id: str = Depends(current_user_id)):
-    return await asset_for(asset_id, user_id)
+    return with_thumbnail(await asset_for(asset_id, user_id))
 
 
 @app.get("/api/v1/assets/{asset_id}/transcript", response_model=TranscriptResponse)
 async def asset_transcript(asset_id: str, user_id: str = Depends(current_user_id)):
     asset = await asset_for(asset_id, user_id)
-    transcript = project_dir(asset["project_id"]) / "proxies" / asset_id / "transcript.json"
+    folder = project_dir(asset["project_id"]) / "proxies" / asset_id
     try:
-        words = json.loads(transcript.read_text(encoding="utf-8"))
+        words = json.loads((folder / "transcript.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         words = []
-    return {"asset_id": asset_id, "words": words}
+    try:
+        meta = json.loads((folder / "transcript.meta.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        meta = {}
+    return {"asset_id": asset_id, "words": words, "language": meta.get("language"), "reviewed": bool(meta.get("reviewed")), "status": asset.get("transcript_status")}
+
+
+@app.put("/api/v1/assets/{asset_id}/transcript", response_model=TranscriptResponse)
+async def save_transcript(asset_id: str, payload: TranscriptUpdate, user_id: str = Depends(current_user_id)):
+    """Save the user's corrections; captions and edits use this version."""
+
+    asset = await asset_for(asset_id, user_id)
+    words = [word.model_dump() for word in payload.words if word.text.strip()]
+    for word in words:
+        word["text"] = word["text"].strip()
+        if word["end_ms"] < word["start_ms"]:
+            raise HTTPException(status_code=422, detail=f"Word {word['id']} ends before it starts")
+    words.sort(key=lambda word: (word["start_ms"], word["end_ms"]))
+    write_transcript(project_dir(asset["project_id"]) / "proxies" / asset_id, words, language=payload.language or asset.get("transcript_language"), reviewed=True)
+    await publish_event(asset["project_id"], {"type": "transcript.edited", "asset_id": asset_id, "language": payload.language})
+    return {"asset_id": asset_id, "words": words, "language": payload.language or asset.get("transcript_language"), "reviewed": True, "status": "ready"}
+
+
+@app.post("/api/v1/assets/{asset_id}/transcribe", status_code=202)
+async def retranscribe(asset_id: str, payload: TranscribeRequest, user_id: str = Depends(current_user_id)):
+    """Run Whisper again, for example with the language set explicitly."""
+
+    asset = await asset_for(asset_id, user_id)
+    await publish_event(asset["project_id"], {"type": "transcribe.queued", "asset_id": asset_id})
+    await enqueue_job("transcribe", {"project_id": asset["project_id"], "asset_id": asset_id, "language": payload.language, "vocabulary": payload.vocabulary})
+    return {"status": "transcribing"}
 
 
 @app.get("/api/v1/assets/{asset_id}/url", response_model=AssetURLResponse)
@@ -565,13 +704,29 @@ async def project_outputs(project_id: str, user_id: str = Depends(current_user_i
 
     await require_project_access(project_id, user_id)
     root = project_dir(project_id)
-    files = [path for pattern in ("renders/**/*.mp4", "compositions/**/*.mp4") for path in root.glob(pattern) if path.is_file() and "node_modules" not in path.parts]
-    files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    # Finished videos only: skip the source footage a reel copies into its
+    # assets/ and the renderer's scratch folders.
+    files = sorted(output_files(root), key=lambda path: path.stat().st_mtime, reverse=True)
+    catalog = read_catalog(root)
+    runs = sorted((run for run in repo.runs.values() if run["project_id"] == project_id and run.get("skill")), key=lambda run: str(run["created_at"]))
     outputs = []
     for path in files[:50]:
         relative = path.relative_to(root).as_posix()
         stat = path.stat()
-        outputs.append({"name": path.name, "path": relative, "size_bytes": stat.st_size, "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc), "url": project_files.url(f"{project_id}/{relative}")})
+        entry = catalog.get(relative)
+        if entry is None:
+            # Videos made before the catalog existed: match by time.
+            folder = composition_for(root, path)
+            meta = composition_meta(folder) if folder else {}
+            made_at = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
+            run = next((item for item in reversed(runs) if str(item["created_at"]) <= made_at), runs[-1] if runs else None)
+            entry = {"composition": folder.relative_to(root).as_posix() if folder else None, "skill": meta.get("skill") or (run or {}).get("skill"), "title": meta.get("title") or (run or {}).get("brief")}
+        outputs.append({
+            "name": path.name, "path": relative, "size_bytes": stat.st_size,
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc),
+            "url": project_files.url(f"{project_id}/{relative}"),
+            "composition": entry.get("composition"), "skill": entry.get("skill"), "title": entry.get("title"),
+        })
     return outputs
 
 
@@ -616,13 +771,15 @@ def run_prompt(brief: str, skill: str | None) -> str:
 async def create_run(project_id: str, payload: RunCreate, user_id: str = Depends(current_user_id)):
     await require_project_access(project_id, user_id)
     run_id = str(uuid4())
-    planned = requires_plan(scene_count=payload.scene_count, motion_graphics=payload.motion_graphics, brief=payload.brief)
+    # Fast mode needs a style that ships a fast.json manifest; others use the agent.
+    mode = "fast" if payload.mode == "fast" and skill_supports_fast(project_dir(project_id), payload.skill) else "agent"
+    planned = mode == "agent" and requires_plan(scene_count=payload.scene_count, motion_graphics=payload.motion_graphics, brief=payload.brief)
     status_value = "waiting_for_approval" if planned else "queued"
-    run = {"id": run_id, "project_id": project_id, "status": status_value, "brief": payload.brief, "skill": payload.skill, "sdk_session_id": None, "usage": {}, "created_at": now()}
+    run = {"id": run_id, "project_id": project_id, "status": status_value, "brief": payload.brief, "skill": payload.skill, "mode": mode, "asset_id": payload.asset_id, "quick": payload.quick, "sdk_session_id": None, "usage": {}, "created_at": now()}
     repo.runs[run_id] = run
     if database.enabled:
         await database.create_agent_run(run_id, project_id, payload.brief, {"max_turns": 80, "max_budget_usd": 10.0, "wall_clock_timeout_s": 1800})
-    repo.append_event(run_id, {"type": "run.created", "status": status_value, "brief": payload.brief, "skill": payload.skill})
+    await publish_event(run_id, {"type": "run.created", "status": status_value, "brief": payload.brief, "skill": payload.skill, "record": run})
     if planned:
         repo.timelines.setdefault(project_id, [])
         repo.create_initial_timeline(project_id)
@@ -630,7 +787,7 @@ async def create_run(project_id: str, payload: RunCreate, user_id: str = Depends
         storyboard = Storyboard(project_id=project_id, brief=payload.brief, scenes=[StoryScene(id=f"scene-{index + 1}", title=f"Scene {index + 1}", start_ms=index * duration, end_ms=(index + 1) * duration) for index in range(payload.scene_count)])
         write_storyboard(project_dir(project_id), storyboard)
     else:
-        await enqueue_job("agent_run", {"run_id": run_id, "project_id": project_id, "brief": run_prompt(payload.brief, payload.skill)})
+        await enqueue_job("agent_run", {"run_id": run_id, "project_id": project_id, "brief": run_prompt(payload.brief, payload.skill), "skill": payload.skill, "title": payload.brief, "mode": mode, "asset_id": payload.asset_id, "quick": payload.quick, "prompt": payload.brief if mode == "fast" else None, "resources": attached_resources(project_id, payload.resources)})
     return run
 
 
@@ -671,23 +828,26 @@ async def answer_run(run_id: str, payload: UserMessage, user_id: str = Depends(c
     run = await run_for(run_id, user_id)
     if run["status"] in {"queued", "running"}:
         raise HTTPException(status_code=409, detail="The agent is still working on this run")
-    repo.append_event(run_id, {"type": "user.answer", "answer": payload.answer})
-    if run["status"] == "waiting_for_approval":
-        if payload.answer.strip().lower() not in {"approve", "approved", "yes"}:
-            await set_run_status(run, "revision_requested")
-            return {"accepted": True, "status": run["status"]}
-        await set_run_status(run, "queued")
+    approving = run["status"] == "waiting_for_approval"
+    approved = payload.answer.strip().lower() in {"approve", "approved", "yes"}
+    next_status = "revision_requested" if approving and not approved else "queued"
+    # The event carries the resulting status so a replay lands on it too.
+    resources = attached_resources(run["project_id"], payload.resources)
+    await publish_event(run_id, {"type": "user.answer", "answer": payload.answer, "status": next_status, "resources": [repo.assets[item]["filename"] for item in resources]})
+    await set_run_status(run, next_status)
+    if approving and not approved:
+        return {"accepted": True, "status": run["status"]}
+    if approving:
         storyboard_path = project_dir(run["project_id"]) / "storyboard.json"
         if storyboard_path.is_file():
             storyboard = Storyboard.model_validate_json(storyboard_path.read_text(encoding="utf-8"))
             storyboard.status, storyboard.approved_by = "approved", user_id
             write_storyboard(storyboard_path.parent, storyboard)
-        await enqueue_job("agent_run", {"run_id": run_id, "project_id": run["project_id"], "brief": run_prompt(run["brief"], run.get("skill"))})
+        await enqueue_job("agent_run", {"run_id": run_id, "project_id": run["project_id"], "brief": run_prompt(run["brief"], run.get("skill")), "skill": run.get("skill"), "title": run["brief"]})
         return {"accepted": True, "status": run["status"]}
     # Any other answer is a follow-up turn in the same SDK session, so the
     # agent keeps its context: the plan, the files it read, its questions.
-    await set_run_status(run, "queued")
-    await enqueue_job("agent_run", {"run_id": run_id, "project_id": run["project_id"], "prompt": payload.answer, "resume": run.get("sdk_session_id")})
+    await enqueue_job("agent_run", {"run_id": run_id, "project_id": run["project_id"], "prompt": payload.answer, "resume": run.get("sdk_session_id"), "skill": run.get("skill"), "title": run["brief"], "mode": run.get("mode", "agent"), "asset_id": run.get("asset_id"), "quick": run.get("quick", False), "resources": resources})
     return {"accepted": True, "status": run["status"]}
 
 
@@ -697,7 +857,7 @@ async def cancel_run(run_id: str, user_id: str = Depends(current_user_id)):
     if local_runner is not None:
         local_runner.cancel(run_id)
     await set_run_status(run, "cancelled")
-    repo.append_event(run_id, {"type": "run.cancelled"})
+    await publish_event(run_id, {"type": "run.cancelled"})
     return run
 
 
@@ -712,8 +872,8 @@ async def create_render(project_id: str, payload: RenderCreate, user_id: str = D
     await require_project_access(project_id, user_id)
     render = {"id": str(uuid4()), "project_id": project_id, "preset": payload.preset, "status": "queued", "output_url": None, "verification": None, "created_at": now()}
     repo.renders[render["id"]] = render
-    repo.append_event(render["id"], {"type": "render.created", "status": "queued"})
-    await enqueue_job("render", {"render_id": render["id"], "project_id": project_id, "preset": payload.preset, "brief": payload.brief or "", "frame_extracts": payload.frame_extracts})
+    await publish_event(render["id"], {"type": "render.created", "status": "queued", "record": render})
+    await enqueue_job("render", {"render_id": render["id"], "project_id": project_id, "preset": payload.preset, "brief": payload.brief or "", "frame_extracts": payload.frame_extracts, "composition": payload.composition})
     return render
 
 
@@ -832,7 +992,7 @@ async def upload_skill(file: UploadFile = File(...), user_id: str = Depends(curr
     finally:
         if temporary_path:
             temporary_path.unlink(missing_ok=True)
-    skill = repo.create_skill(package.frontmatter.name, package.frontmatter.description, "user", package.body)
+    skill = repo.create_skill(package.frontmatter.name, package.frontmatter.description, "user", package.body, fast=True, engine="generic")
     skill["scripts_approved"] = False
     return skill
 
@@ -887,14 +1047,28 @@ async def create_style_extraction(payload: StyleExtractionCreate, user_id: str =
     if not settings.style_extraction_enabled:
         raise HTTPException(status_code=403, detail="Style extraction is disabled")
     try:
-        urls = validate_user_urls(payload.urls)
+        urls = validate_user_urls(split_urls(payload.urls))
+        name = slugify_skill_name(payload.name)
+        if len(urls) > 6:
+            raise ValueError("Use at most 6 reference videos")
+        if payload.base and payload.base not in BASE_STYLES:
+            raise ValueError(f"Unknown base style; choose one of {', '.join(BASE_STYLES)}")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if any(skill["name"] == name and skill["scope"] != "user" for skill in repo.skills.values()):
+        raise HTTPException(status_code=409, detail=f"{name} is a built-in style; pick another name")
     extraction_id = str(uuid4())
-    record = {"id": extraction_id, "status": "queued", "urls": urls, "style_spec": None, "owner_id": user_id}
+    record = {"id": extraction_id, "status": "queued", "urls": urls, "name": name, "notes": payload.notes, "base": payload.base, "skill_name": None, "error": None, "style_spec": None, "owner_id": user_id, "created_at": now()}
     repo.extractions[extraction_id] = record
-    await enqueue_job("style_extraction", {"extraction_id": extraction_id, "owner_id": user_id, "urls": urls})
+    await publish_event(extraction_id, {"type": "style.created", "record": record})
+    await enqueue_job("style_extraction", {"extraction_id": extraction_id, "owner_id": user_id, "urls": urls, "name": name, "notes": payload.notes, "base": payload.base})
     return record
+
+
+@app.get("/api/v1/style-extractions", response_model=list[StyleExtractionResponse])
+async def list_style_extractions(user_id: str = Depends(current_user_id)):
+    records = [record for record in repo.extractions.values() if record.get("owner_id") == user_id]
+    return sorted(records, key=lambda record: str(record.get("created_at") or ""), reverse=True)
 
 
 @app.get("/api/v1/style-extractions/{extraction_id}", response_model=StyleExtractionResponse)

@@ -8,7 +8,7 @@ Reads edit/sfx.json:
     "cues": [["whoosh", 2.95, 0.22], ["pop", 5.0, 0.22], ["sparkle", 8.7, 0.2]],
     "caption_ticks": true
   }
-  cue = [sound name, start time (s), gain]. Sounds come from the bundled HyperFrames library
+  cue = [sound name or path to an audio file, start time (s), gain]. Sounds come from the bundled HyperFrames library
   (~/.claude/skills/media-use/audio/assets/sfx): whoosh, whoosh-short, whoosh-cinematic, pop,
   click, click-soft, key-press, typing, sparkle, chime, ping, riser, impact-bass-1/2, glitch-1/2/3.
 
@@ -37,7 +37,9 @@ LIB = os.path.normpath(_SIBLING_LIB) if os.path.isdir(_SIBLING_LIB) else os.path
 
 
 def load(name):
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", os.path.join(LIB, name + ".mp3"),
+    # A library name ("whoosh") or a path to the user's own sound file.
+    source = name if os.path.isfile(name) else os.path.join(LIB, name + ".mp3")
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", source,
                           "-f", "f32le", "-ac", "2", "-ar", str(SR), "-"],
                          capture_output=True, check=True).stdout
     x = np.frombuffer(raw, np.float32).reshape(-1, 2).astype(np.float64)

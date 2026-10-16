@@ -18,6 +18,8 @@ os.makedirs("assets/audio", exist_ok=True)
 html = open("index.html", encoding="utf-8").read()
 for name in ("music", "sfx"):
     src = f"assets/{name}.wav"
+    if not os.path.exists(src) or f'id="{name}"' not in html:
+        continue  # no music bed in this edit
     digest = hashlib.md5(open(src, "rb").read()).hexdigest()[:8]
     dst = f"assets/audio/{name}-{digest}.wav"
     for old in glob.glob(f"assets/audio/{name}-*.wav"):

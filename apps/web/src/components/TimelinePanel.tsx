@@ -9,9 +9,10 @@ const trackColors: Record<string, string> = {
   audio: "bg-emerald-500/60 ring-emerald-400",
   caption: "bg-amber-500/60 ring-amber-400",
   graphics: "bg-fuchsia-500/60 ring-fuchsia-400",
+  sfx: "bg-sky-400/70 ring-sky-300",
 };
 
-export function TimelinePanel({ version }: { version?: TimelineVersion }) {
+export function TimelinePanel({ version, onEdit }: { version?: TimelineVersion; onEdit?: () => void }) {
   const timeline = version?.data;
   const duration = Math.max(timeline?.duration_ms ?? 1, 1);
   const tracks = timeline?.tracks ?? [];
@@ -19,10 +20,10 @@ export function TimelinePanel({ version }: { version?: TimelineVersion }) {
   return (
     <Card
       title="Timeline"
-      action={timeline && <div className="flex items-center gap-2 text-[11px] text-slate-500"><Badge>v{version?.version}</Badge>{timeline.width}×{timeline.height} · {timeline.fps ?? 30} fps · {formatDuration(timeline.duration_ms)}</div>}
+      action={timeline && <div className="flex items-center gap-2 text-[11px] text-slate-500">{onEdit && <button onClick={onEdit} className="rounded-md bg-accent/15 px-2 py-1 font-medium text-accent-soft hover:bg-accent/25">Edit in Studio</button>}{version?.source ? <Badge tone="accent" className="max-w-[220px] truncate">HyperFrames · {version.source.split("/").pop()}</Badge> : <Badge>v{version?.version}</Badge>}{timeline.width}×{timeline.height} · {timeline.fps ?? 30} fps · {formatDuration(timeline.duration_ms)}</div>}
     >
       {tracks.length === 0 ? (
-        <Empty icon={<LayersIcon />} title="Timeline is empty">Cut edits made by the agent land here. HyperFrames reels render straight to the preview.</Empty>
+        <Empty icon={<LayersIcon />} title="Timeline is empty">Edits made by the agent land here: cuts, and the tracks of the HyperFrames reels it builds.</Empty>
       ) : (
         <div className="space-y-2 p-4">
           <div className="ml-20 flex justify-between text-[10px] tabular-nums text-slate-500">
@@ -32,11 +33,15 @@ export function TimelinePanel({ version }: { version?: TimelineVersion }) {
             <div key={track.id} className="flex items-center gap-3">
               <div className="w-[68px] shrink-0 truncate text-[11px] font-medium uppercase tracking-wide text-slate-400">{track.type}</div>
               <div className="timeline-grid relative h-9 flex-1 rounded-lg bg-black/30 ring-1 ring-inset ring-line">
-                {track.items?.map((item) => (
-                  <div key={item.id} title={`${item.label ?? item.type} · ${formatDuration(item.start_ms) || "0:00"}–${formatDuration(item.end_ms)}`} className={`absolute inset-y-1 truncate rounded-md px-2 py-1 text-[11px] font-medium text-white ring-1 ring-inset ${trackColors[track.type] ?? "bg-slate-500/60 ring-slate-400"}`} style={{ left: `${(item.start_ms / duration) * 100}%`, width: `${Math.max(((item.end_ms - item.start_ms) / duration) * 100, 0.5)}%` }}>
-                    {item.label ?? item.type}
-                  </div>
-                ))}
+                {track.items?.map((item) => {
+                  // SFX cues are instants: draw a thin mark, name it in the tooltip.
+                  const mark = track.type === "sfx";
+                  return (
+                    <div key={item.id} dir="auto" title={`${item.label ?? item.type} · ${formatDuration(item.start_ms) || "0:00"}–${formatDuration(item.end_ms)}`} className={`absolute truncate ring-1 ring-inset ${mark ? "inset-y-2 w-[3px] rounded-full" : "inset-y-1 rounded-md px-2 py-1 text-[11px] font-medium text-white"} ${trackColors[track.type] ?? "bg-slate-500/60 ring-slate-400"}`} style={{ left: `${(item.start_ms / duration) * 100}%`, ...(mark ? {} : { width: `${Math.max(((item.end_ms - item.start_ms) / duration) * 100, 0.5)}%` }) }}>
+                      {mark ? null : item.label ?? item.type}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}

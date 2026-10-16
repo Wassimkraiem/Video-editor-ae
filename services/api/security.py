@@ -42,7 +42,9 @@ def verify_password(password: str, encoded: str) -> bool:
 def create_token(subject: str, token_type: str, ttl_seconds: int) -> str:
     now = datetime.now(timezone.utc)
     return jwt.encode(
-        {"sub": subject, "type": token_type, "iat": now, "exp": now + timedelta(seconds=ttl_seconds)},
+        # jti keeps two tokens minted in the same second distinct, so rotating
+        # a refresh token never reissues the one just revoked.
+        {"sub": subject, "type": token_type, "iat": now, "exp": now + timedelta(seconds=ttl_seconds), "jti": secrets.token_hex(8)},
         get_settings().access_token_secret,
         algorithm="HS256",
     )

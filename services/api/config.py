@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     claude_code_oauth_token: str = ""
     agent_model: str = "claude-opus-5-5"
     image_model: str = "gpt-image-1"
-    style_extraction_enabled: bool = False
+    style_extraction_enabled: bool = True
     # Run jobs inside the API process when no Postgres queue is configured.
     local_worker_enabled: bool = True
 

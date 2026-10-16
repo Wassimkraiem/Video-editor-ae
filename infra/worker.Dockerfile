@@ -26,7 +26,7 @@ COPY skills ./skills
 COPY compositions ./compositions
 RUN pip install --no-cache-dir -e '.[api,agent,media,skills]'
 RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /work/storage /work/projects \
-    && chown -R app:app /app /work
+    && mkdir -p /work/storage /work/projects /home/app/.claude \
+    && chown -R app:app /app /work /home/app/.claude
 USER app
 CMD ["python", "-m", "services.worker"]

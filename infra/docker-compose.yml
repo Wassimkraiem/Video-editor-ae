@@ -44,7 +44,25 @@ services:
       DATABASE_URL: postgresql+asyncpg://video:video@postgres:5432/video
       STORAGE_ROOT: /work/storage
       PROJECTS_ROOT: /work/projects
-    volumes: ["studio-storage:/work/storage", "project-work:/work/projects"]
+      # Preinstalled faster-whisper models (fw-large-v3, ...), read-only.
+      WHISPER_MODELS_DIR: /models
+      WHISPER_OFFLINE: "1"
+      # HyperFrames Studio (hand-editing timeline) is forwarded on 3400-3409.
+      STUDIO_PUBLIC_BIND: 0.0.0.0
+      STUDIO_PUBLIC_HOST: localhost
+      STUDIO_FIRST_PORT: "3400"
+      STUDIO_SLOTS: "10"
+    ports: ["3400-3409:3400-3409"]
+    volumes:
+      - studio-storage:/work/storage
+      - project-work:/work/projects
+      # Host folder that holds fw-large-v3: WHISPER_MODELS_HOST_DIR if set,
+      # else the user's ~/.cache (USERPROFILE on Windows, HOME elsewhere), so
+      # it works even when compose runs without --env-file.
+      - ${WHISPER_MODELS_HOST_DIR:-${USERPROFILE:-${HOME:-}}/.cache}:/models:ro
+      # Claude Code keeps SDK sessions here; a volume lets a reply resume a
+      # run even after the worker container is recreated.
+      - agent-sessions:/home/app/.claude
     depends_on:
       postgres: {condition: service_healthy}
       sandbox: {condition: service_started}
@@ -72,6 +90,7 @@ services:
     command: ["sleep", "infinity"]
 
 volumes:
+  agent-sessions:
   postgres-data:
   studio-storage:
   project-work:

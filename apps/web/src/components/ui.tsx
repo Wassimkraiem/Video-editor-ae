@@ -26,7 +26,7 @@ export function Card({ className = "", children, title, action }: { className?: 
   return (
     <section className={`rounded-2xl border border-line bg-panel/80 shadow-panel backdrop-blur ${className}`}>
       {(title || action) && (
-        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
           <h2 className="text-sm font-semibold tracking-tight text-slate-100">{title}</h2>
           {action}
         </header>

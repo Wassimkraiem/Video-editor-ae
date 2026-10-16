@@ -1,0 +1,19 @@
+{
+  "about": "Fast edit manifest: the worker runs setup and build; one Claude call writes the plan files. See services/worker/fast_edit.py.",
+  "setup": [["python", "{skill}/scripts/prep_cutout.py", "{clip}"]],
+  "setup_quick": [["python", "{skill}/scripts/prep_cutout.py", "{clip}", "--skip-cutout"]],
+  "ready_when": ["assets/source.mp4"],
+  "plan_files": {
+    "phrases": {"path": "edit/phrases.txt", "format": "lines", "doc": "one caption pill per line: the transcript words in order, grouped as natural 2-4 word phrases (SKILL.md section 4)"},
+    "keys": {"path": "edit/keys.json", "format": "json", "doc": "keyword -> colour object, about one pill in four (SKILL.md section 4)"},
+    "beats": {"path": "edit/beats.json", "format": "json", "doc": "the edit plan: list of beats (SKILL.md section 5 table and layout rules)"},
+    "style": {"path": "edit/style.json", "format": "json", "doc": "style keys (palette, startMode, popout, capY, paper ...) from SKILL.md section 5"},
+    "sfx": {"path": "edit/sfx.json", "format": "json", "doc": "sound plan for build_sfx.py: duration, word_ticks, keyword_gain, cues (SKILL.md section 6); keep caption sounds subtle"}
+  },
+  "build": [
+    ["python", "{skill}/scripts/chunk_captions.py"],
+    ["python", "{skill}/scripts/build_comp.py"],
+    ["python", "{skill}/scripts/build_sfx.py"]
+  ],
+  "spec": ["SKILL.md", "references/style-guide.md"]
+}

@@ -82,3 +82,24 @@ def test_permission_callback_denies_escapes(tmp_path: Path):
     raw = asyncio.run(check("Edit", {"file_path": "raw/clip.mp4"}))
     assert getattr(denied, "behavior", None) == "deny" and getattr(raw, "behavior", None) == "deny"
     assert getattr(allowed, "behavior", None) == "allow"
+
+
+def test_agent_runs_never_download_speech_models():
+    options = build_sdk_options({"env": {}}, SDKRunConfig(), post_tool_use=lambda *_args: {})
+    assert options["env"]["WHISPER_OFFLINE"] == "1"
+    assert options["env"]["HF_HUB_OFFLINE"] == "1"
+
+
+def test_large_sdk_messages_fit_and_events_drop_images():
+    from worker.agent_runtime import compact_for_events
+
+    options = build_sdk_options({}, SDKRunConfig(), post_tool_use=lambda *_args: {})
+    assert options["max_buffer_size"] >= 16 * 1024 * 1024
+    message = {"_type": "UserMessage", "content": [{"_type": "ToolResultBlock", "content": [
+        {"type": "image", "source": {"type": "base64", "data": "A" * 3_000_000}},
+        {"type": "text", "text": "x" * 50_000},
+    ]}]}
+    compacted = compact_for_events(message)
+    parts = compacted["content"][0]["content"]
+    assert parts[0]["source"] == "[image omitted]"
+    assert len(parts[1]["text"]) < 21_000

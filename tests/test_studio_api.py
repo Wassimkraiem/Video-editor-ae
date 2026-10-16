@@ -65,7 +65,7 @@ def test_follow_up_message_resumes_the_sdk_session():
         repo.runs[run_id].update(status="succeeded", sdk_session_id="session-1")
         reply = client.post(f"/api/v1/runs/{run_id}/messages", headers=headers, json={"answer": "Use the blue palette"})
         assert reply.json()["status"] == "queued"
-        assert repo.jobs[-1]["payload"] == {"run_id": run_id, "project_id": project_id, "prompt": "Use the blue palette", "resume": "session-1"}
+        assert repo.jobs[-1]["payload"] == {"run_id": run_id, "project_id": project_id, "prompt": "Use the blue palette", "resume": "session-1", "skill": None, "title": "Trim it", "mode": "agent", "asset_id": None, "quick": False, "resources": []}
 
 
 def test_project_files_need_a_signature_or_the_owner(tmp_path: Path):
@@ -89,8 +89,8 @@ def test_local_runner_ingests_an_upload(tmp_path: Path):
     async def scenario() -> None:
         runner = LocalJobRunner(local_repo, projects_root, storage_root)
         runner.submit("ingest", {"asset_id": "a1", "project_id": "p1", "storage_key": "projects/p1/raw/clip.mp4", "filename": "clip.mp4"})
-        for _ in range(200):
-            if local_repo.assets["a1"]["status"] != "uploaded":
+        for _ in range(600):
+            if any(event["type"].startswith("transcribe.") and event["type"] != "transcribe.started" for event in local_repo.events.get("p1", [])):
                 break
             await asyncio.sleep(0.1)
         await runner.shutdown()
@@ -100,4 +100,22 @@ def test_local_runner_ingests_an_upload(tmp_path: Path):
     assert asset["status"] == "ready", local_repo.events
     assert asset["probe"]["width"] == 320 and asset["probe"]["has_audio"]
     assert (projects_root / "p1" / "proxies" / "a1" / "asset.json").is_file()
-    assert [event["type"] for event in local_repo.events["p1"]] == ["ingest.started", "ingest.completed"]
+    kinds = [event["type"] for event in local_repo.events["p1"]]
+    # Transcription follows ingest; with no Whisper model here it fails
+    # without undoing the upload.
+    assert kinds[:3] == ["ingest.started", "ingest.completed", "transcribe.started"]
+    assert kinds[3] in {"transcribe.completed", "transcribe.failed"}
+
+
+def test_outputs_skip_source_footage_and_scratch_renders():
+    from services.api.main import project_dir
+
+    with TestClient(app) as client:
+        headers = owner(client, "outputs@example.com")
+        project_id = client.post("/api/v1/projects", headers=headers, json={"name": "Outputs"}).json()["id"]
+        root = project_dir(project_id)
+        for relative in ("renders/final.mp4", "renders/work-1/frame.mp4", "compositions/reel/assets/source.mp4", "compositions/reel/renders/v2.mp4"):
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_bytes(b"x")
+        paths = {item["path"] for item in client.get(f"/api/v1/projects/{project_id}/outputs", headers=headers).json()}
+        assert paths == {"renders/final.mp4", "compositions/reel/renders/v2.mp4"}

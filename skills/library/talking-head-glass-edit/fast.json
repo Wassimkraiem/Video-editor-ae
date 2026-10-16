@@ -1,0 +1,16 @@
+{
+  "about": "Fast edit manifest: the worker runs setup and build; one Claude call writes the plan files. See services/worker/fast_edit.py.",
+  "setup": [["python", "{skill}/scripts/prep_footage.py", "{clip}"]],
+  "ready_when": ["assets/source.mp4", "edit/footage.json"],
+  "plan_files": {
+    "plan": {"path": "edit/plan.json", "format": "json", "doc": "the whole edit for scripts/build_glass.py (schema in its docstring, below): caption groups as word-index ranges covering every word, cards, kinetic beats, zooms, optional music. Follow references/design-system.md for density, placement and timing; time every card and beat to word onsets from the transcript"},
+    "sfx": {"path": "edit/sfx.json", "format": "json", "doc": "sound plan for scripts/build_sfx.py (its docstring): one subtle cue on each card/beat entrance; a resource sound may be named by its path"}
+  },
+  "build": [
+    ["python", "{skill}/scripts/build_glass.py"],
+    ["python", "{skill}/scripts/build_captions.py"],
+    ["python", "{skill}/scripts/build_sfx.py"],
+    ["python", "{skill}/scripts/publish_audio.py"]
+  ],
+  "spec": ["SKILL.md", "references/design-system.md", "scripts/build_glass.py:doc", "scripts/build_sfx.py:doc"]
+}

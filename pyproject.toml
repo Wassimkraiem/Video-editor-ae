@@ -42,6 +42,8 @@ skills = [
   "numpy>=1.26",
   "scipy>=1.11",
   "faster-whisper>=1.0",
+  # Downloads style reference videos for cloning.
+  "yt-dlp>=2025.1.1",
 ]
 
 [tool.setuptools.packages.find]

@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from .media import audio_extract_command, ffprobe_command, proxy_command, thumbnail_command
-from .transcription import Transcriber
 
 
 def run_command(argv: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
@@ -38,7 +37,7 @@ def summarize_probe(probe: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def ingest_asset(asset_path: str | Path, artifact_dir: str | Path, transcriber: Transcriber | None = None, *, asset: dict[str, Any] | None = None) -> dict[str, Any]:
+def ingest_asset(asset_path: str | Path, artifact_dir: str | Path, *, asset: dict[str, Any] | None = None) -> dict[str, Any]:
     source = Path(asset_path).resolve()
     artifacts = Path(artifact_dir).resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -51,11 +50,7 @@ def ingest_asset(asset_path: str | Path, artifact_dir: str | Path, transcriber: 
     thumbnail_pattern = artifacts / "thumbnails" / "%05d.jpg"
     thumbnail_pattern.parent.mkdir(parents=True, exist_ok=True)
     run_command(thumbnail_command(source, thumbnail_pattern).argv)
-    transcript = []
-    if transcriber:
-        transcript = [word.__dict__ for word in transcriber.transcribe(str(source))]
     (artifacts / "probe.json").write_text(json.dumps(probe, indent=2), encoding="utf-8")
-    (artifacts / "transcript.json").write_text(json.dumps(transcript, indent=2), encoding="utf-8")
     # The manifest is what the agent's list_assets/describe_asset tools read.
     manifest = {
         **(asset or {}),
@@ -66,4 +61,24 @@ def ingest_asset(asset_path: str | Path, artifact_dir: str | Path, transcriber: 
         "probe": summarize_probe(probe),
     }
     (artifacts / "asset.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
-    return {"probe": probe, "manifest": manifest, "proxy": str(proxy), "audio": str(audio), "thumbnails": str(thumbnail_pattern.parent), "transcript": transcript, "scenes": []}
+    return {"probe": probe, "manifest": manifest, "proxy": str(proxy), "audio": str(audio), "thumbnails": str(thumbnail_pattern.parent), "scenes": []}
+
+
+def ingest_resource(asset_path: str | Path, artifact_dir: str | Path, *, asset: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Probe an attached image, logo, sound or b-roll: no proxy, audio or transcript."""
+
+    source = Path(asset_path).resolve()
+    artifacts = Path(artifact_dir).resolve()
+    artifacts.mkdir(parents=True, exist_ok=True)
+    probe = json.loads(run_command(ffprobe_command(source).argv).stdout)
+    summary = summarize_probe(probe)
+    if summary.get("width"):
+        thumbnails = artifacts / "thumbnails"
+        thumbnails.mkdir(parents=True, exist_ok=True)
+        try:
+            run_command(thumbnail_command(source, thumbnails / "%05d.jpg").argv)
+        except subprocess.CalledProcessError:
+            pass  # a thumbnail is a nicety; the resource is still usable
+    manifest = {**(asset or {}), "id": (asset or {}).get("id", artifacts.name), "role": "resource", "path": str(source), "probe": summary}
+    (artifacts / "asset.json").write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+    return {"probe": probe, "manifest": manifest}

@@ -25,6 +25,26 @@ import numpy as np
 sys.stdout.reconfigure(encoding="utf-8")
 
 
+def resolve_model(name):
+    """Return a local faster-whisper model folder, downloading only as a last resort.
+
+    Looks in $WHISPER_MODELS_DIR/fw-<name> (the studio mounts preinstalled
+    models there) and then ~/.cache/fw-<name>. With WHISPER_OFFLINE=1 a
+    missing model is an error instead of a multi-GB download.
+    """
+    roots = [os.environ.get("WHISPER_MODELS_DIR"), os.path.expanduser("~/.cache")]
+    for root in filter(None, roots):
+        candidate = os.path.join(root, f"fw-{name}")
+        if os.path.isfile(os.path.join(candidate, "model.bin")):
+            return candidate
+    if os.environ.get("WHISPER_OFFLINE") == "1":
+        sys.exit(f"faster-whisper model '{name}' is not installed (looked in {', '.join(filter(None, roots))}). "
+                 "Use the default model or install it with scripts/fetch_models.py.")
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(f"Systran/faster-whisper-{name}", local_dir=os.path.expanduser(f"~/.cache/fw-{name}"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("audio")
@@ -34,10 +54,8 @@ def main():
     a = ap.parse_args()
 
     from faster_whisper import WhisperModel
-    from huggingface_hub import snapshot_download
 
-    path = snapshot_download(f"Systran/faster-whisper-{a.model}",
-                             local_dir=os.path.expanduser(f"~/.cache/fw-{a.model}"))
+    path = resolve_model(a.model)
     model = WhisperModel(path, device="cpu", compute_type="int8")
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", a.audio, "-vn", "-ac", "1", "-ar", "16000",
                           "-f", "s16le", "-"], capture_output=True, check=True).stdout

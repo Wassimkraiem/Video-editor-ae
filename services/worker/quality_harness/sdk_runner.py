@@ -56,9 +56,23 @@ def build_sdk_options(
     # a second summarizer in application code.
     sdk_env = dict(options.get("env") or {})
     sdk_env.setdefault("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "80")
+    # Speech models are preinstalled (scripts/fetch_models.py); a run must
+    # never stall on a multi-GB download, so a missing model fails fast.
+    sdk_env.setdefault("WHISPER_OFFLINE", "1")
+    sdk_env.setdefault("HF_HUB_OFFLINE", "1")
+    # Keep the cached prompt prefix (system prompt, skills, style docs) for an
+    # hour instead of five minutes, so edits of other videos in the same style
+    # read it at a tenth of the input price.
+    if os.getenv("PROMPT_CACHE_1H", "1") != "0":
+        sdk_env.setdefault("ENABLE_PROMPT_CACHING_1H", "1")
     sdk_env.pop("DISABLE_AUTO_COMPACT", None)
     sdk_env.pop("DISABLE_COMPACT", None)
     options["env"] = sdk_env
+    # The CLI sends each message as one JSON line; a tool result holding an
+    # image (a frame or snapshot the agent inspects) easily passes the SDK's
+    # 1 MB default and kills the run with "JSON message exceeded maximum
+    # buffer size".
+    options.setdefault("max_buffer_size", 64 * 1024 * 1024)
     options.update(
         {
             "model": config.model,

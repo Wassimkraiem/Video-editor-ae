@@ -37,6 +37,94 @@ def load_project_media(project_dir: str | Path) -> tuple[dict[str, dict[str, Any
     return assets, transcripts
 
 
+TRANSCRIBING_MARKER = ".transcribing"
+
+
+def pending_transcripts(project_dir: str | Path) -> list[str]:
+    """Clips whose ingest or transcription is still running."""
+
+    return sorted(marker.parent.name for marker in Path(project_dir).resolve().glob(f"proxies/*/{TRANSCRIBING_MARKER}"))
+
+
+def _clock(ms: int) -> str:
+    return f"{ms / 1000:.1f}"
+
+
+def media_brief(project_dir: str | Path) -> str:
+    """Describe every clip and its transcript for the start of an agent turn.
+
+    The transcript (corrected by the user when marked reviewed) is the source
+    of truth for captions, so it is handed over in full rather than left for
+    the agent to find or re-create.
+    """
+
+    root = Path(project_dir).resolve()
+    assets, transcripts = load_project_media(root)
+    if not assets:
+        return ""
+    lines = ["## Project media (prepared by the studio)", ""]
+    for asset_id, asset in assets.items():
+        if asset.get("role") == "resource":
+            continue  # attached per request, see resource_brief
+        probe = asset.get("probe") or {}
+        folder = root / "proxies" / asset_id
+        try:
+            meta = json.loads((folder / "transcript.meta.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            meta = {}
+        raw = Path(str(asset.get("path", ""))).name
+        size = f"{probe.get('width')}x{probe.get('height')}" if probe.get("width") else "audio"
+        duration = f"{(probe.get('duration_ms') or 0) / 1000:.1f}s"
+        lines.append(f"### Clip `{asset_id}`: {asset.get('filename', raw)} ({duration}, {size})")
+        lines.append(f"- source: `raw/{raw}`, proxy: `proxies/{asset_id}/proxy.mp4`")
+        words = transcripts.get(asset_id) or []
+        if not words:
+            lines.append("- transcript: none (no speech, or transcription failed); transcribe with the skill's script if you need one")
+            lines.append("")
+            continue
+        language = {"tn": "Tunisian (Darija in Arabic script, French/English in Latin)"}.get(str(meta.get("language")), str(meta.get("language") or "unknown"))
+        status = "REVIEWED and corrected by the user" if meta.get("reviewed") else "automatic, not reviewed yet"
+        status += ": use these exact words and timings; never re-transcribe, respell or correct them (the user fixes words in the Transcripts center)"
+        lines.append(f"- transcript: {language}; {status}")
+        lines.append(f"- files: `proxies/{asset_id}/transcript.json` (ms) and `proxies/{asset_id}/words.json` (the skills' `edit/words.json` format, seconds): copy words.json into the skill project's `edit/words.json`")
+        segments: dict[int, list[dict[str, Any]]] = {}
+        for word in words:
+            segments.setdefault(int(word.get("segment", 0)), []).append(word)
+        lines.append("")
+        lines.append("```")
+        for segment in segments.values():
+            lines.append(f"[{_clock(segment[0]['start_ms'])}-{_clock(segment[-1]['end_ms'])}] " + " ".join(str(word["text"]) for word in segment))
+        lines.append("```")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def describe_resource(asset: dict[str, Any]) -> str:
+    probe = asset.get("probe") or {}
+    seconds = (probe.get("duration_ms") or 0) / 1000
+    if probe.get("width") and seconds > 1:
+        kind = f"video {probe['width']}x{probe['height']}, {seconds:.1f}s"
+    elif probe.get("width"):
+        kind = f"image {probe['width']}x{probe['height']}"
+    else:
+        kind = f"audio {seconds:.1f}s"
+    return f"{asset.get('filename')} ({kind})"
+
+
+def resource_brief(project_dir: str | Path, ids: list[str]) -> str:
+    """The files the user attached to this request, for agent-mode turns."""
+
+    assets, _ = load_project_media(project_dir)
+    lines = [f"- `raw/{Path(str(assets[item].get('path', ''))).name}`: {describe_resource(assets[item])}" for item in ids if item in assets]
+    if not lines:
+        return ""
+    return (
+        "## Attached resources\n\nThe user attached these for this request. Copy each one you use into the composition's "
+        "`assets/resources/` and use it where the request says (images as cards, screenshots or overlays; sounds as SFX or music):\n"
+        + "\n".join(lines)
+    )
+
+
 class ProjectToolService:
     def __init__(
         self,

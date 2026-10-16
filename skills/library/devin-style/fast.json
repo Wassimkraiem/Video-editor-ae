@@ -1,0 +1,64 @@
+{
+  "about": "Fast edit manifest: the worker runs setup and build; one Claude call writes the plan files. See services/worker/fast_edit.py.",
+  "setup": [
+    [
+      "python",
+      "{skill}/scripts/prep_subject.py",
+      "{clip}",
+      "--key",
+      "left"
+    ],
+    [
+      "python",
+      "{skill}/scripts/studio_plate.py",
+      "assets/plate.png",
+      "--preset",
+      "penthouse",
+      "--head-y",
+      "{subject.head_y}"
+    ]
+  ],
+  "ready_when": [
+    "assets/source.mp4"
+  ],
+  "plan_files": {
+    "keys": {
+      "path": "edit/keys.json",
+      "format": "json",
+      "doc": "keyword -> colour object, roughly one card in five; colour carries meaning (SKILL.md section 4)"
+    },
+    "beats": {
+      "path": "edit/beats.json",
+      "format": "json",
+      "doc": "the edit plan: list of beats (SKILL.md section 5)"
+    },
+    "style": {
+      "path": "edit/style.json",
+      "format": "json",
+      "doc": "optional style keys described in SKILL.md; {} when the defaults fit"
+    },
+    "sfx": {
+      "path": "edit/sfx.json",
+      "format": "json",
+      "doc": "sound plan for build_sfx.py: duration plus optional cues (SKILL.md section 6)"
+    }
+  },
+  "build": [
+    [
+      "python",
+      "{skill}/scripts/chunk_captions.py"
+    ],
+    [
+      "python",
+      "{skill}/scripts/build_comp.py"
+    ],
+    [
+      "python",
+      "{skill}/scripts/build_sfx.py"
+    ]
+  ],
+  "spec": [
+    "SKILL.md",
+    "references/style-guide.md"
+  ]
+}
