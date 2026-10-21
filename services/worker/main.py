@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .handlers import WorkerContext, failure_event, handle_job
-from .jobs import JobRecord, PostgresJobQueue
+from .jobs import INTERRUPTED, JobRecord, PostgresJobQueue
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("video-editor-worker")
@@ -20,7 +20,7 @@ logger = logging.getLogger("video-editor-worker")
 MAX_CONCURRENT_JOBS = int(os.getenv("WORKER_CONCURRENCY", "3"))
 # Agent runs spend API credits and have side effects: never retry them
 # automatically. The user can reply to the run to try again.
-NO_RETRY = {"agent_run", "style_extraction"}
+NO_RETRY = {"agent_run", "style_extraction", "skill_edit"}
 
 
 def run_forever() -> None:
@@ -59,6 +59,10 @@ async def _run_postgres(worker_id: str, database_url: str) -> None:
         event_sink=publish,
         agent_persistence=persistence,
     )
+    for job in await queue.recover(worker_id, NO_RETRY):
+        logger.warning("job_interrupted id=%s type=%s", job.id, job.type)
+        if failed := failure_event(job, INTERRUPTED):
+            await publish(*failed)
     slots = asyncio.Semaphore(MAX_CONCURRENT_JOBS)
     agent_lane = asyncio.Semaphore(1)
     running: set[asyncio.Task[None]] = set()

@@ -124,7 +124,11 @@ def transcribe_to_folder(audio_path: Path, folder: Path, *, language: str | None
     """Run Whisper and store the raw words (``transcript.raw.json`` keeps them)."""
 
     whisper_language, prompt = whisper_settings(language, vocabulary)
-    words, detected = (transcriber or FasterWhisperTranscriber()).transcribe(str(audio_path), whisper_language, prompt)
+    if transcriber is None:
+        from .groq_transcription import default_transcriber
+
+        transcriber = default_transcriber()
+    words, detected = transcriber.transcribe(str(audio_path), whisper_language, prompt)
     records = [asdict(word) for word in words]
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "transcript.raw.json").write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")

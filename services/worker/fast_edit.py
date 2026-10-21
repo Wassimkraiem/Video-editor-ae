@@ -33,6 +33,8 @@ MAX_REPAIRS = 2
 # Styles without their own engine: one call writes the whole composition.
 GENERIC_DIR = Path(__file__).resolve().parent / "fast_generic"
 HELPER_SKILLS = {"media-use"}
+# What a caption style contributes when it is combined with another style's motion.
+CAPTION_DOCS = ("SKILL.md", "references/style-guide.md")
 MAX_DOC_CHARS = 60_000
 
 
@@ -42,6 +44,8 @@ class FastManifest:
     data: dict[str, Any]
     # Where "@style/..." spec entries resolve: the style itself for the generic engine.
     style_dir: Path | None = None
+    # A different style whose captions replace the main style's (generic engine only).
+    caption_dir: Path | None = None
 
     @classmethod
     def load(cls, skill_dir: Path) -> FastManifest | None:
@@ -51,10 +55,13 @@ class FastManifest:
         return cls(skill_dir, json.loads(path.read_text(encoding="utf-8")))
 
     @classmethod
-    def for_style(cls, style_dir: Path) -> FastManifest | None:
-        """The style's own engine, else the generic one for any real style."""
+    def for_style(cls, style_dir: Path, *, generic: bool = False) -> FastManifest | None:
+        """The style's own engine, else the generic one for any real style.
 
-        if own := cls.load(style_dir):
+        ``generic`` forces the generic engine (a style engine needs footage).
+        """
+
+        if not generic and (own := cls.load(style_dir)):
             return own
         if not is_style(style_dir):
             return None
@@ -85,6 +92,11 @@ class FastManifest:
                 text = ast.get_docstring(ast.parse(text)) or ""
             text = text[:MAX_DOC_CHARS]
             parts.append(f'<doc path="{relative}">\n{text}\n</doc>')
+        if self.caption_dir is not None:
+            for relative in CAPTION_DOCS:
+                path = self.caption_dir / relative
+                if path.is_file():
+                    parts.append(f'<doc path="captions/{self.caption_dir.name}/{relative}">\n{path.read_text(encoding="utf-8")[:MAX_DOC_CHARS]}\n</doc>')
         return "\n\n".join(parts)
 
 
@@ -160,7 +172,7 @@ Rules:
 - Every scene switch, card, graphic and sound starts on a word onset and illustrates what is said at that moment; numbers, names, tools and lists get their matching visual; pacing follows the speaker's energy.
 - Use only the beat types, fields and style keys the engine documentation defines; respect its layout rules and safe zones.
 - Follow the user's request; when it does not say, use the engine's defaults.
-
+{combine}
 Answer with ONE JSON object and nothing else, with exactly these keys:
 {files}
 - "notes": one or two sentences telling the user what you did.
@@ -279,19 +291,40 @@ def _attach_resources(project: Path, folder: Path, ids: list[str]) -> list[str]:
     return lines
 
 
-async def run_fast_edit(project: Path, *, run_id: str, skill: str, request: str, emit: Emit, asset_id: str | None = None, quick: bool = False, resources: list[str] | None = None) -> dict[str, Any]:
-    """Run (or continue) a fast edit; returns usage and the rendered file."""
+def combine_rule(skill: str, caption_skill: str | None) -> str:
+    if not caption_skill:
+        return ""
+    return (f"- Two styles are combined. Captions (font, size, colours, position, word timing and their entrance/exit animation) follow the `{caption_skill}` docs under `captions/` exactly; "
+            f"everything else (scenes, motion graphics, cards, transitions, zooms, sounds) follows `{skill}`. Where the two disagree on layout, keep captions readable and graphics out of their way.\n")
+
+
+async def run_fast_edit(project: Path, *, run_id: str, skill: str, request: str, emit: Emit, asset_id: str | None = None, quick: bool = False, resources: list[str] | None = None, footage: bool = True, caption_skill: str | None = None) -> dict[str, Any]:
+    """Run (or continue) a fast edit; returns usage and the rendered file.
+
+    ``footage=False`` makes a video with no clip (motion graphics, product launch).
+    """
 
     bootstrap_project(project)
     skill_dir = project / ".claude" / "skills" / skill
-    manifest = FastManifest.for_style(skill_dir)
+    state_file = project / ".agent-context" / "fast" / f"{run_id}.json"
+    saved = json.loads(state_file.read_text(encoding="utf-8")) if state_file.is_file() else {}
+    footage = bool(saved.get("footage", True)) if saved else footage
+    # Follow-ups keep the caption style the edit started with.
+    caption_skill = saved.get("caption_skill", caption_skill) if saved else caption_skill
+    caption_skill = caption_skill if caption_skill and caption_skill != skill else None
+    caption_dir = project / ".claude" / "skills" / caption_skill if caption_skill else None
+    if caption_dir is not None and not is_style(caption_dir):
+        raise ValueError(f"{caption_skill} is not an editing style")
+    # A style's own engine draws its own captions, so a mix runs on the generic engine.
+    manifest = FastManifest.for_style(skill_dir, generic=not footage or caption_dir is not None)
     if manifest is None:
         raise ValueError(f"{skill} is not an editing style")
+    manifest.caption_dir = caption_dir
     engine_dir = manifest.skill_dir
     state_path = project / ".agent-context" / "fast" / f"{run_id}.json"
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
     # The generic engine also makes videos with no footage (product launches, explainers).
-    clip_id, clip = _pick_clip(project, state.get("asset_id") or asset_id, optional=manifest.generic)
+    clip_id, clip = _pick_clip(project, state.get("asset_id") or asset_id, optional=manifest.generic) if footage else (None, {})
     words_file = project / "proxies" / str(clip_id) / "words.json"
     if clip_id and not words_file.is_file() and not manifest.generic:
         raise FileNotFoundError("This clip has no transcript yet; wait for it in Transcripts")
@@ -320,7 +353,7 @@ async def run_fast_edit(project: Path, *, run_id: str, skill: str, request: str,
     attached = list(dict.fromkeys([*state.get("resources", []), *(resources or [])]))
     resource_lines = _attach_resources(project, folder, attached)
     subject = (folder / "edit" / "subject.json").read_text(encoding="utf-8") if (folder / "edit" / "subject.json").is_file() else "{}"
-    system = PLAN_SYSTEM.format(skill=skill, files=_files_doc(manifest), spec=manifest.spec())
+    system = PLAN_SYSTEM.format(skill=skill, files=_files_doc(manifest), spec=manifest.spec(), combine=combine_rule(skill, caption_skill))
     context = "No footage: build the whole video from the request." if not clip_id else f"Clip: {clip.get('filename')}, {duration:.1f}s, {(clip.get('probe') or {}).get('width')}x{(clip.get('probe') or {}).get('height')}\nedit/subject.json: {subject}\n\nTranscript (index, seconds, word):\n{_transcript_lines(words)}"
     if resource_lines:
         context += "\n\nFiles the user attached (paths relative to the composition). Use each where the request says, through the engine's fields for images, b-roll or sounds (image/screenshot/media cards, img fields, sfx cues by path):\n" + "\n".join(resource_lines)
@@ -360,7 +393,7 @@ async def run_fast_edit(project: Path, *, run_id: str, skill: str, request: str,
     output.parent.mkdir(parents=True, exist_ok=True)
     await _step(emit, "render", "Rendering the video", [shutil.which("npx") or "npx", "hyperframes", "render", "-q", "delivery", "-o", str(output)], folder, 3600)
 
-    state.update(resources=attached, asset_id=clip_id, composition=f"compositions/{folder.name}", skill=skill, plan=plan, cost=total_cost, turns=turn)
+    state.update(footage=footage, caption_skill=caption_skill, resources=attached, asset_id=clip_id, composition=f"compositions/{folder.name}", skill=skill, plan=plan, cost=total_cost, turns=turn)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
     return {"output": str(output), "composition": state["composition"], "usage": {"total_cost_usd": round(total_cost, 4), "mode": "fast", "turns": turn}}

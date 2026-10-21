@@ -94,10 +94,12 @@ def _sfx_items(folder: Path) -> list[dict[str, Any]]:
     return items
 
 
-def composition_timeline(project_root: Path) -> dict[str, Any] | None:
-    """Timeline of the most recently edited composition, or None if there is none."""
+def composition_timeline(project_root: Path, composition: str | None = None) -> dict[str, Any] | None:
+    """Timeline of one composition (the most recently edited by default), or None if there is none."""
 
     candidates = [path for path in (project_root / "compositions").glob("*/index.html") if path.is_file()]
+    if composition:
+        candidates = [path for path in candidates if path.parent.relative_to(project_root).as_posix() == composition]
     if not candidates:
         return None
     index = max(candidates, key=lambda path: path.stat().st_mtime)

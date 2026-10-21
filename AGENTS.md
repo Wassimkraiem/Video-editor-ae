@@ -171,6 +171,14 @@ disables it).
 `wassim-style`, `devin-style`, `talking-head-glass-edit`,
 `kinetic-editorial-reel`, `talking-head-recut`, `product-launch-*`,
 `general-video`, plus `hyperframes*` and `media-use`, which the styles call.
+Marketing-format styles written from research (`docs/marketing-video-playbook.md`):
+`performance-ad`, `ui-feature-reel`, `three-step-promo`, `kinetic-type-recap`,
+`teaser-countdown`, `offer-ad`, `testimonial-proof`, `listicle-explainer`, and
+`auto-style` (Claude designs the look from the script + the user's brand kit). They
+have no `fast.json`, so they run on the generic engine. A run may also name a
+`caption_skill` (captions from one style, motion from another; generic engine) and a
+`brand` kit. Style trailers/covers live in `<PROJECTS_ROOT>/_skill_previews/<style>/`
+(`services/worker/skill_previews.py`).
 `project_bootstrap.install_skills` copies `builtin` and `library` into each
 project and refreshes a skill when its `SKILL.md` changes. Skill scripts find
 sibling skills relative to their own path (see `build_sfx.py`), so they work

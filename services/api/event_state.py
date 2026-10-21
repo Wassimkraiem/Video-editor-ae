@@ -42,6 +42,9 @@ def apply_event(repo: MemoryRepository, stream_id: str, event: dict[str, Any]) -
             extraction.update(status="completed", skill_name=skill.get("name"))
             register_user_skill(repo, skill)
         return
+    if kind == "skill.restored" and isinstance(event.get("skill"), dict):
+        register_user_skill(repo, event["skill"])
+        return
     if kind in {"studio.ready", "studio.failed"}:
         repo.studios[stream_id] = {"status": "ready" if kind == "studio.ready" else "failed", **{key: event.get(key) for key in ("url", "composition", "error")}}
         return

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover - imported only by type checkers
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+INTERRUPTED = "Interrupted: the worker restarted while this was running. Start it again."
 
 @dataclass
 class JobRecord:
@@ -85,6 +86,32 @@ class PostgresJobQueue:
             locked_at=row.get("locked_at"),
             last_error=row.get("last_error"),
         )
+
+    async def recover(self, worker_id: str, no_retry: set[str]) -> list[JobRecord]:
+        """Release jobs this worker id still holds from before a restart.
+
+        A worker restarts with the same id, so anything still marked running
+        under it was cut off mid-way. Jobs that are safe to repeat go back in
+        the queue; the rest are marked dead and returned so the caller can
+        tell the user (they would otherwise show "running" forever).
+        """
+
+        from sqlalchemy import text
+
+        async with self.sessions() as session:
+            result = await session.execute(text("SELECT * FROM jobs WHERE status='running' AND locked_by=:worker_id FOR UPDATE"), {"worker_id": worker_id})
+            rows = list(result.mappings())
+            dead: list[JobRecord] = []
+            for row in rows:
+                status = "dead" if row["type"] in no_retry else "queued"
+                await session.execute(
+                    text("UPDATE jobs SET status=:status, last_error=:error, locked_by=NULL, locked_at=NULL, run_after=now() WHERE id=:id"),
+                    {"status": status, "error": INTERRUPTED, "id": row["id"]},
+                )
+                if status == "dead":
+                    dead.append(JobRecord(id=str(row["id"]), type=str(row["type"]), payload=dict(row["payload"] or {}), status=status, attempts=int(row["attempts"])))
+            await session.commit()
+        return dead
 
     async def complete(self, job: JobRecord) -> None:
         async with self.sessions() as session:

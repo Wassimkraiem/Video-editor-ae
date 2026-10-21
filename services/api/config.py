@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     # Alternative to an API key: a subscription token from `claude setup-token`.
     claude_code_oauth_token: str = ""
+    # Hosted Whisper for ingest transcripts; local faster-whisper without a key.
+    groq_api_key: str = ""
+    transcriber: str = ""
     agent_model: str = "claude-opus-5-5"
     image_model: str = "gpt-image-1"
     style_extraction_enabled: bool = True

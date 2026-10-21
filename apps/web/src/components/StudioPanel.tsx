@@ -11,7 +11,7 @@ import { AlertIcon, LayersIcon } from "./icons";
  */
 export type StudioRequest = { composition: string; nonce: number };
 
-export function StudioPanel({ projectId, hasComposition, onRender, rendering, request }: { projectId?: string; hasComposition: boolean; onRender: (composition?: string | null) => void; rendering: boolean; request?: StudioRequest }) {
+export function StudioPanel({ projectId, composition, onRender, rendering, request }: { projectId?: string; composition?: string | null; onRender: (composition?: string | null) => void; rendering: boolean; request?: StudioRequest }) {
   const [state, setState] = useState<StudioState>({ status: "closed" });
   const [frameKey, setFrameKey] = useState(0);
 
@@ -35,13 +35,15 @@ export function StudioPanel({ projectId, hasComposition, onRender, rendering, re
     return () => { stopped = true; if (timer) clearTimeout(timer); };
   }, [projectId, frameKey]);
 
-  async function open(composition?: string | null) {
+  async function open(reel?: string | null) {
     if (!projectId) return;
-    setState(await api.openStudio(projectId, composition ?? state.composition));
+    setState(await api.openStudio(projectId, reel ?? composition ?? state.composition));
     setFrameKey((key) => key + 1);
   }
 
-  const ready = state.status === "ready" && state.url;
+  const hasComposition = Boolean(composition);
+  // Studio may still be showing another video's reel; only embed this one's.
+  const ready = state.status === "ready" && state.url && (!composition || state.composition === composition);
   return (
     <Card
       className="flex h-[calc(100vh-10rem)] min-h-[620px] flex-col overflow-hidden"
@@ -50,7 +52,7 @@ export function StudioPanel({ projectId, hasComposition, onRender, rendering, re
         <div className="flex items-center gap-2">
           {ready && <a href={state.url ?? undefined} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-lg px-2.5 text-xs text-slate-300 hover:bg-white/[0.06]">Open in tab</a>}
           {ready && <Button size="sm" variant="secondary" onClick={() => void open()}>Reload</Button>}
-          <Button size="sm" onClick={() => onRender(state.composition)} disabled={!hasComposition || rendering} title="Render the reel with your Studio edits">{rendering ? <><Spinner /> Rendering</> : "Render"}</Button>
+          <Button size="sm" onClick={() => onRender(composition)} disabled={!hasComposition || rendering} title="Render the reel with your Studio edits">{rendering ? <><Spinner /> Rendering</> : "Render"}</Button>
         </div>
       }
     >

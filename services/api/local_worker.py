@@ -24,7 +24,7 @@ logger = logging.getLogger("video-editor-local-worker")
 
 # Agent runs are long and expensive: one at a time. Media jobs get their own
 # lane so an upload is ingested while the agent is still working.
-LANES = {"agent_run": "agent", "style_extraction": "agent"}
+LANES = {"agent_run": "agent", "style_extraction": "agent", "skill_edit": "agent"}
 LANE_LIMITS = {"agent": 1, "media": 2}
 
 

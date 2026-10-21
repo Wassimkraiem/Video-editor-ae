@@ -2,14 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import type { Asset, Run, Skill } from "../lib/api-client";
+import type { Asset, BrandKit, Run, Skill } from "../lib/api-client";
 import { buildChat, type ChatItem, type RunEvent } from "../lib/agent-events";
 import { Badge, Button, Card, Spinner, StatusBadge, Textarea } from "./ui";
 import { ResourcePicker } from "./ResourcePicker";
 import { AlertIcon, BookIcon, CheckIcon, ChevronIcon, FileIcon, SendIcon, SparkIcon, StopIcon, TerminalIcon } from "./icons";
 
 /** House styles first; helper skills (hyperframes-*, media-use) stay out of the picker. */
-const FEATURED = ["wassim-style", "devin-style", "talking-head-glass-edit", "kinetic-editorial-reel", "talking-head-recut", "product-launch-video", "product-launch-motion", "general-video"];
+const FEATURED = ["auto-style", "wassim-style", "devin-style", "talking-head-glass-edit", "kinetic-editorial-reel", "talking-head-recut", "product-launch-video", "product-launch-motion", "general-video", "performance-ad", "ui-feature-reel", "offer-ad", "testimonial-proof", "listicle-explainer", "three-step-promo", "kinetic-type-recap", "teaser-countdown"];
 const HELPER = /^(hyperframes|media-use)/;
 
 const PROMPTS: Record<string, string> = {
@@ -120,9 +120,11 @@ export function ChatTranscript({ events, onAnswer }: { events: RunEvent[]; onAns
   return <>{items.map((item) => <ChatRow key={item.key} item={item} onAnswer={(text) => onAnswer?.(text)} />)}</>;
 }
 
-export type StartOptions = { mode: "fast" | "agent"; assetId?: string; quick: boolean; resources?: string[] };
+export type VideoKind = "people" | "motion" | "product";
+export type Intensity = "minimal" | "balanced" | "bold";
+export type StartOptions = { mode: "fast" | "agent"; assetId?: string; quick: boolean; resources?: string[]; kind?: VideoKind; intensity?: Intensity; clips?: string[]; cut?: boolean; script?: string; captionSkill?: string | null; brand?: BrandKit | null };
 
-export function AgentPanel({ projectId, run, events, styles, agentReady, onStart, onReply, onCancel, onNewRun, clips, runs, onSelectRun, onReviewTranscript, resources = [], onUploadResources }: {
+export function AgentPanel({ projectId, run, events, styles, agentReady, onStart, onReply, onCancel, onNewRun, clips, onReviewTranscript, resources = [], onUploadResources }: {
   projectId?: string;
   run?: Run;
   events: RunEvent[];
@@ -135,8 +137,6 @@ export function AgentPanel({ projectId, run, events, styles, agentReady, onStart
   resources?: Asset[];
   onUploadResources?: (files: File[]) => Promise<Asset[]>;
   clips: Asset[];
-  runs: Run[];
-  onSelectRun: (run: Run) => void;
   onReviewTranscript: (assetId: string) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -144,7 +144,6 @@ export function AgentPanel({ projectId, run, events, styles, agentReady, onStart
   const [mode, setMode] = useState<"fast" | "agent">("fast");
   const [clipId, setClipId] = useState<string>();
   const [quick, setQuick] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
   const [attached, setAttached] = useState<string[]>([]);
   const videos = clips.filter((clip) => clip.kind === "video" && clip.role !== "resource");
   const clip = videos.find((item) => item.id === clipId) ?? videos[0];
@@ -186,7 +185,6 @@ export function AgentPanel({ projectId, run, events, styles, agentReady, onStart
       title={<span className="flex items-center gap-2"><SparkIcon className="text-accent-soft" /> Agent</span>}
       action={
         <div className="flex items-center gap-2">
-          <Button size="sm" variant={showHistory ? "secondary" : "ghost"} onClick={() => setShowHistory((open) => !open)}>History{runs.length ? ` (${runs.length})` : ""}</Button>
           {run && <StatusBadge status={run.status} />}
           {working && <Button size="sm" variant="danger" onClick={() => void onCancel()}><StopIcon width={12} height={12} /> Stop</Button>}
           {run && !working && <Button size="sm" variant="ghost" onClick={() => { onNewRun(); setDraft(""); }}>New edit</Button>}
@@ -194,20 +192,7 @@ export function AgentPanel({ projectId, run, events, styles, agentReady, onStart
       }
     >
       <div ref={scroller} className="scroll-quiet flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {showHistory && (
-          <ul className="space-y-1">
-            {runs.length === 0 && <li className="text-xs text-slate-500">No chats yet.</li>}
-            {runs.map((item) => (
-              <li key={item.id}>
-                <button onClick={() => { onSelectRun(item); setShowHistory(false); }} className={`w-full rounded-lg px-2.5 py-2 text-left transition ${run?.id === item.id ? "bg-accent/15 ring-1 ring-inset ring-accent/30" : "hover:bg-white/[0.04]"}`}>
-                  <span className="line-clamp-2 text-xs text-slate-200" dir="auto">{item.brief}</span>
-                  <span className="mt-1 flex items-center gap-2 text-[11px] text-slate-500"><StatusBadge status={item.status} />{item.skill}{item.mode === "fast" && <Badge tone="accent">fast</Badge>}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {!showHistory && !run && (
+        {!run && (
           <div className="flex h-full flex-col justify-center py-6">
             <p className="text-lg font-semibold tracking-tight text-white">What should we make?</p>
             <p className="mt-1 text-sm text-slate-400">Upload a clip, pick a style, and describe the edit. The agent plans, builds with HyperFrames, checks its work and renders.</p>
@@ -220,7 +205,7 @@ export function AgentPanel({ projectId, run, events, styles, agentReady, onStart
             </div>
           </div>
         )}
-        {!showHistory && items.map((item) => <ChatRow key={item.key} item={item} onAnswer={(text) => void send(text)} />)}
+        {items.map((item) => <ChatRow key={item.key} item={item} onAnswer={(text) => void send(text)} />)}
         {working && <div className="flex items-center gap-2 text-xs text-slate-500"><Spinner /> {run?.status === "queued" ? "Waiting for the worker…" : "Working…"}</div>}
       </div>
 

@@ -67,6 +67,40 @@ def composition_for(project: Path, output: Path, preferred: list[Path] | None = 
     return max(candidates, key=lambda folder: (folder / "index.html").stat().st_mtime) if candidates else None
 
 
+# Short names the house styles go by in file names.
+STYLE_ALIASES = {"glass": "talking-head-glass-edit", "kinetic": "kinetic-editorial-reel"}
+
+
+def guess_style(names: list[str], skills: list[str]) -> str | None:
+    """The style a video was made in, read from its file or reel name.
+
+    For videos made before outputs were tagged: "protect-your-job-neon-3d-blue.mp4"
+    is neon-3d-blue, "protectyourjob-wassim" is wassim-style. The longest
+    match wins, so "neon-3d-blue" beats a shorter style hidden inside it.
+    """
+
+    text = " ".join(names).lower()
+    candidates = {skill: skill for skill in skills} | {skill.removesuffix("-style"): skill for skill in skills if skill.endswith("-style")} | STYLE_ALIASES
+    found = [(len(key), skill) for key, skill in candidates.items() if key and key in text and skill in skills]
+    return max(found)[1] if found else None
+
+
+def record_manual(project: Path, output: Path, edit_id: str, title: str, render_id: str) -> None:
+    """Tag a video exported from the manual editor, so it reopens there."""
+
+    catalog = read_catalog(project)
+    catalog[output.relative_to(project).as_posix()] = {
+        "composition": None,
+        "skill": "manual",
+        "title": title,
+        "run_id": None,
+        "edit_id": edit_id,
+        "render_id": render_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_catalog(project, catalog)
+
+
 def _write_catalog(project: Path, catalog: dict[str, dict[str, Any]]) -> None:
     path = project / CATALOG
     path.parent.mkdir(parents=True, exist_ok=True)

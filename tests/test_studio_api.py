@@ -119,3 +119,38 @@ def test_outputs_skip_source_footage_and_scratch_renders():
             (root / relative).write_bytes(b"x")
         paths = {item["path"] for item in client.get(f"/api/v1/projects/{project_id}/outputs", headers=headers).json()}
         assert paths == {"renders/final.mp4", "compositions/reel/renders/v2.mp4"}
+
+
+def test_outputs_and_timeline_belong_to_their_run():
+    import json
+
+    from services.api.main import project_dir
+    from services.worker.catalog import COMPOSITION_META
+
+    with TestClient(app) as client:
+        headers = owner(client, "scoped@example.com")
+        project_id = client.post("/api/v1/projects", headers=headers, json={"name": "Scoped"}).json()["id"]
+        root = project_dir(project_id)
+        for name, run_id in (("first", "run-a"), ("second", "run-b")):
+            folder = root / "compositions" / name
+            (folder / "renders").mkdir(parents=True, exist_ok=True)
+            (folder / "index.html").write_text(f'<div id="root" data-composition-id="{name}" data-width="1080" data-height="1920" data-duration="2"></div>', encoding="utf-8")
+            (folder / COMPOSITION_META).write_text(json.dumps({"run_id": run_id}), encoding="utf-8")
+            (folder / "renders" / "out.mp4").write_bytes(b"x")
+        outputs = client.get(f"/api/v1/projects/{project_id}/outputs", headers=headers).json()
+        assert {item["composition"]: item["run_id"] for item in outputs} == {"compositions/first": "run-a", "compositions/second": "run-b"}
+
+        timeline = client.get(f"/api/v1/projects/{project_id}/timeline/composition", headers=headers, params={"composition": "compositions/first"}).json()
+        assert timeline["source"] == "compositions/first"
+        assert client.get(f"/api/v1/projects/{project_id}/timeline/composition", headers=headers, params={"composition": "../etc"}).status_code == 422
+
+
+def test_style_is_read_from_old_video_names():
+    from services.worker.catalog import guess_style
+
+    skills = ["wassim-style", "talking-head-glass-edit", "neon-3d-blue", "devin-style"]
+    assert guess_style(["protect-your-job-neon-3d-blue"], skills) == "neon-3d-blue"
+    assert guess_style(["protectyourjob-wassim"], skills) == "wassim-style"
+    assert guess_style(["kachabia-3920-glass-reel"], skills) == "talking-head-glass-edit"
+    assert guess_style(["781f0b3b-9ea9-4a07", "compositions/protectyourjob-wassim"], skills) == "wassim-style"
+    assert guess_style(["final"], skills) is None

@@ -15,3 +15,6 @@ os.environ["PROJECTS_ROOT"] = os.path.join(_root, "projects")
 os.environ["LOCAL_WORKER_ENABLED"] = "false"
 os.environ["STYLE_EXTRACTION_ENABLED"] = "true"
 os.environ.pop("ANTHROPIC_API_KEY", None)
+# Never call the hosted transcriber from tests.
+os.environ.pop("GROQ_API_KEY", None)
+os.environ["TRANSCRIBER"] = "local"

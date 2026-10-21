@@ -4,12 +4,17 @@ import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type { Health, Project } from "../lib/api-client";
 import { Badge, Button, Input } from "./ui";
-import { BookIcon, FilmIcon, LayersIcon, LogoutIcon, PlusIcon, SparkIcon } from "./icons";
+import { BookIcon, FilmIcon, LayersIcon, LogoutIcon, PlayIcon, PlusIcon, SparkIcon } from "./icons";
 
-export type View = "create" | "library" | "styles";
+export type View = "create" | "editor" | "videos" | "library" | "styles";
+// The footage editor (ManualEditor, /projects/{id}/edits) is hidden until it is ready;
+// the code and API stay. Flip this to bring the sidebar item and the view back.
+export const MANUAL_EDITOR_ENABLED = false;
 
 const NAV: { id: View; label: string; hint: string; icon: ReactNode }[] = [
   { id: "create", label: "Create", hint: "Upload → transcript → style → edit", icon: <SparkIcon width={18} height={18} /> },
+  { id: "editor", label: "Editor", hint: "Cut, sound, captions · free", icon: <FilmIcon width={18} height={18} /> },
+  { id: "videos", label: "Videos", hint: "All your edits, by style", icon: <PlayIcon width={18} height={18} /> },
   { id: "library", label: "Library", hint: "Raw, in progress, edited", icon: <LayersIcon width={18} height={18} /> },
   { id: "styles", label: "Styles", hint: "Your styles and cloning", icon: <BookIcon width={18} height={18} /> },
 ];
@@ -76,7 +81,7 @@ export function AppSidebar({ view, onView, projects, activeId, onSelectProject, 
       </div>
 
       <nav className="mt-5 flex-1 space-y-1 px-3">
-        {NAV.map((item) => {
+        {NAV.filter((item) => item.id !== "editor" || MANUAL_EDITOR_ENABLED).map((item) => {
           const active = view === item.id;
           return (
             <button key={item.id} onClick={() => onView(item.id)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${active ? "bg-accent/15 text-white ring-1 ring-inset ring-accent/30" : "text-slate-400 hover:bg-white/[0.04] hover:text-white"}`}>

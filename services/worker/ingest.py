@@ -34,7 +34,20 @@ def summarize_probe(probe: dict[str, Any]) -> dict[str, Any]:
         "fps": fps,
         "has_audio": bool(audio),
         "video_codec": video.get("codec_name"),
+        "rotation": _rotation(video),
     }
+
+
+def _rotation(video: dict[str, Any]) -> int:
+    """Phone footage stores portrait as landscape plus a rotation flag."""
+
+    for side in video.get("side_data_list") or []:
+        if "rotation" in side:
+            return int(float(side["rotation"])) % 360
+    try:
+        return int((video.get("tags") or {}).get("rotate", 0)) % 360
+    except ValueError:
+        return 0
 
 
 def ingest_asset(asset_path: str | Path, artifact_dir: str | Path, *, asset: dict[str, Any] | None = None) -> dict[str, Any]:

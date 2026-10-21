@@ -7,7 +7,7 @@ import { DownloadIcon, PlayIcon } from "./icons";
 
 export type PreviewSource = { url: string; title: string; subtitle?: string; composition?: string | null; skill?: string | null };
 
-export function PreviewPanel({ source, outputs, renders, onSelect, onRender, canRender, onOpenInStudio }: {
+export function PreviewPanel({ source, outputs, renders, onSelect, onRender, canRender, onOpenInStudio, working = false }: {
   source?: PreviewSource;
   outputs: Output[];
   renders: Render[];
@@ -15,6 +15,7 @@ export function PreviewPanel({ source, outputs, renders, onSelect, onRender, can
   onRender: () => void;
   canRender: boolean;
   onOpenInStudio: (composition: string) => void;
+  working?: boolean;
 }) {
   const active = renders.find((render) => render.status === "queued" || render.status === "running");
   const failed = renders.find((render) => render.status === "failed");
@@ -35,11 +36,11 @@ export function PreviewPanel({ source, outputs, renders, onSelect, onRender, can
           {source ? (
             <video key={source.url} src={mediaUrl(source.url)} controls playsInline className="h-full w-full object-contain" />
           ) : (
-            <Empty icon={<PlayIcon />} title="Nothing to preview yet">Finished edits and renders from the agent appear here. Click a clip in Media to watch the source.</Empty>
+            working ? <div className="flex items-center gap-2 text-sm text-slate-400"><Spinner /> Your video is being edited…</div> : <Empty icon={<PlayIcon />} title="No video yet">This edit's video appears here when it's ready. Other videos are in the Library.</Empty>
           )}
         </div>
         {failed && !active && <p className="mt-2 truncate rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-200" title={failed.error ?? undefined}>Last render failed: {failed.error ?? "unknown error"}</p>}
-        {outputs.length > 0 && (
+        {outputs.length > 1 && (
           <div className="scroll-quiet mt-3 flex gap-2 overflow-x-auto pb-1">
             {outputs.map((output) => {
               const selected = source?.url === output.url;

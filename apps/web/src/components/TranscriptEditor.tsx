@@ -58,6 +58,10 @@ export function TranscriptEditor({ assets, assetId, onChanged, onApproved }: { a
   const [now, setNow] = useState(0);
   const [state, setState] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const [showOptions, setShowOptions] = useState(false);
+  const [showScript, setShowScript] = useState(false);
+  const [script, setScript] = useState("");
+  const [aligning, setAligning] = useState(false);
+  const [alignError, setAlignError] = useState("");
   const video = useRef<HTMLVideoElement>(null);
   const status = asset?.transcript_status ?? null;
   const busy = status === "transcribing" || status === "cleaning";
@@ -110,6 +114,22 @@ export function TranscriptEditor({ assets, assetId, onChanged, onApproved }: { a
     }
   }
 
+  // The user's own script, timed from the speech; reviewed here, saved on approve.
+  async function alignScript() {
+    if (!assetId || !script.trim()) return;
+    setAligning(true);
+    setAlignError("");
+    try {
+      const result = await api.alignTranscript(assetId, script);
+      setWords(result.words);
+      setShowScript(false);
+    } catch (reason) {
+      setAlignError(reason instanceof Error ? reason.message : "Could not align the script");
+    } finally {
+      setAligning(false);
+    }
+  }
+
   async function retranscribe() {
     if (!assetId) return;
     await api.transcribe(assetId, language, vocabulary);
@@ -137,13 +157,24 @@ export function TranscriptEditor({ assets, assetId, onChanged, onApproved }: { a
         }
         action={
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setShowOptions((open) => !open)}>Language & re-transcribe</Button>
+            <Button size="sm" variant={showScript ? "secondary" : "ghost"} onClick={() => { setShowScript((open) => !open); setShowOptions(false); }}>Paste your script</Button>
+            <Button size="sm" variant="ghost" onClick={() => { setShowOptions((open) => !open); setShowScript(false); }}>Language & re-transcribe</Button>
             <Button size="sm" onClick={() => void approve()} disabled={busy || words.length === 0 || state === "saving" || (reviewed && !dirty && !onApproved)}>
               {state === "saving" && <Spinner />}{reviewed && !dirty ? (onApproved ? "Continue" : "Approved") : dirty ? "Save & approve" : "Approve transcript"}
             </Button>
           </div>
         }
       >
+        {showScript && (
+          <div className="space-y-2 border-b border-line bg-white/[0.02] px-4 py-3">
+            <p className="text-xs text-slate-400">Paste exactly what you said, spelled the way you want it on screen. Each word gets its timing from the audio, and a new line starts a new caption block. Check it below, then approve.</p>
+            <textarea dir="auto" rows={6} value={script} onChange={(event) => setScript(event.target.value)} placeholder="إيجا نفسرلك كيفاش تحمي خدمتك من الـAI…" className="w-full rounded-lg border border-line bg-black/30 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-accent/50" />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => void alignScript()} disabled={aligning || busy || !script.trim()}>{aligning && <Spinner />}Time it to the audio</Button>
+              {alignError && <span className="text-xs text-red-300">{alignError}</span>}
+            </div>
+          </div>
+        )}
         {showOptions && (
           <div className="flex flex-wrap items-center gap-2 border-b border-line bg-white/[0.02] px-4 py-3">
             <select value={language} onChange={(event) => setLanguage(event.target.value)} className="h-8 rounded-md border border-line bg-black/30 px-2 text-xs text-slate-200 outline-none" aria-label="Language">

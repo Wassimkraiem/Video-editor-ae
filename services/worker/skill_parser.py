@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -25,15 +27,66 @@ class SkillPackage(BaseModel):
     has_scripts: bool
 
 
+PLAIN_FIELD = re.compile(r"^([A-Za-z_][\w-]*):[ \t]+(.*?)[ \t]*$")
+
+
+def repair_frontmatter(text: str) -> str:
+    """Quote plain one-line values that YAML rejects.
+
+    Agents write descriptions like ``description: Captions: small white text``;
+    the second ": " makes YAML read a nested mapping and fail. Valid
+    frontmatter comes back unchanged.
+    """
+
+    try:
+        yaml.safe_load(text)
+        return text
+    except yaml.YAMLError:
+        pass
+    lines = []
+    for line in text.split("\n"):
+        match = PLAIN_FIELD.match(line)
+        value = match.group(2) if match else ""
+        if match and value and value[0] not in "'\"|>[{&*!#" and (": " in value or " #" in value or value.endswith(":")):
+            line = f"{match.group(1)}: {json.dumps(value, ensure_ascii=False)}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def split_skill(text: str) -> tuple[str, str]:
+    if not text.startswith("---"):
+        raise ValueError("SKILL.md requires YAML frontmatter")
+    _, frontmatter_text, body = text.split("---", 2)
+    return frontmatter_text, body
+
+
+def repair_skill_file(path: Path) -> bool:
+    """Rewrite SKILL.md with repaired frontmatter; True when it changed.
+
+    Claude Code reads the same frontmatter when it loads the skill, so the
+    fix has to land in the file, not only in our parse.
+    """
+
+    text = path.read_text(encoding="utf-8")
+    frontmatter_text, body = split_skill(text)
+    repaired = repair_frontmatter(frontmatter_text)
+    if repaired == frontmatter_text:
+        return False
+    path.write_text(f"---{repaired}---{body}", encoding="utf-8")
+    return True
+
+
 def parse_skill(path: str | Path) -> SkillPackage:
     source = Path(path).resolve()
     if source.name != "SKILL.md":
         raise ValueError("Skill entrypoint must be SKILL.md")
     text = source.read_text(encoding="utf-8")
-    if not text.startswith("---"):
-        raise ValueError("SKILL.md requires YAML frontmatter")
-    _, frontmatter_text, body = text.split("---", 2)
-    frontmatter = SkillFrontmatter.model_validate(yaml.safe_load(frontmatter_text) or {})
+    frontmatter_text, body = split_skill(text)
+    try:
+        loaded = yaml.safe_load(repair_frontmatter(frontmatter_text))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"SKILL.md frontmatter is not valid YAML: {exc}") from exc
+    frontmatter = SkillFrontmatter.model_validate(loaded or {})
     return SkillPackage(frontmatter=frontmatter, body=body.strip(), checksum=hashlib.sha256(text.encode()).hexdigest(), has_scripts=(source.parent / "scripts").is_dir())
 
 

@@ -170,9 +170,10 @@ def style_brief(name: str, references: list[str], notes: str, base: str | None) 
 def install_user_skill(workspace: Path, name: str, projects_root: Path) -> Path:
     """Validate the agent's skill and publish it for every project."""
 
-    from .skill_parser import parse_skill
+    from .skill_parser import parse_skill, repair_skill_file
 
     source = workspace / "skill-out" / name
+    repair_skill_file(source / "SKILL.md")
     package = parse_skill(source / "SKILL.md")
     if package.frontmatter.name != name:
         raise ValueError(f"SKILL.md names the skill {package.frontmatter.name!r}, expected {name!r}")

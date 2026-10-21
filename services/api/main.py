@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import secrets
+import shutil
 import os
 import tempfile
 import zipfile
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -22,6 +23,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import get_settings
 from .repository import MemoryRepository, now
 from .schemas import (
+    ScriptAlign,
     AssetResponse,
     AssetURLResponse,
     CompositionFilesResponse,
@@ -49,6 +51,9 @@ from .schemas import (
     UserLogin,
     UserMessage,
     UserResponse,
+    ManualEditCreate,
+    SkillEditCreate,
+    SkillPreviewFromOutput,
     MemoryUpdate,
     OutputResponse,
     StudioOpen,
@@ -63,11 +68,13 @@ from .composition_timeline import composition_timeline
 from .queue import enqueue_postgres_job
 from .persistence import PostgresPersistence
 from services.worker.skill_parser import validate_skill_archive
-from services.worker.style_extraction import BASE_STYLES, slugify_skill_name, split_urls, validate_user_urls
+from services.worker.style_extraction import BASE_STYLES, skill_summary, slugify_skill_name, split_urls, validate_user_urls
 from .rate_limit import expensive_rate_limit
 from services.worker.quality_harness.models import ProjectProfile
 from services.worker.fast_edit import fast_engine, skill_supports_fast
-from services.worker.catalog import composition_for, composition_meta, output_files, read_catalog
+from services.worker.catalog import composition_for, composition_meta, guess_style, output_files, read_catalog
+from services.worker import manual_edit, skill_editing, skill_previews
+from services.worker.alignment import align_script
 from services.worker.transcription import write_transcript
 from services.worker.project_bootstrap import SKILL_SOURCES, SKILLS_ROOT, bootstrap_project
 from services.worker.quality_harness.project_memory import create_project_memory
@@ -83,6 +90,8 @@ storage = LocalStorage(settings.storage_root, settings.access_token_secret)
 # Agent outputs (renders, compositions) live in the project workspace and are
 # served through short-lived signed URLs so <video> tags can play them.
 project_files = LocalStorage(settings.projects_root, settings.access_token_secret, route="/api/v1/project-files")
+# Style trailers and covers; served only through signed links (they play in <video>/<img> tags).
+preview_files = LocalStorage(Path(settings.projects_root) / skill_previews.PREVIEWS_DIR, settings.access_token_secret, route="/api/v1/skill-previews")
 local_runner: LocalJobRunner | None = None
 TERMINAL_EVENTS = {"agent.succeeded", "agent.failed", "run.cancelled", "render.completed", "render.failed"}
 
@@ -94,7 +103,7 @@ def export_agent_environment() -> None:
     CLI spawned by the in-process worker needs real environment variables.
     """
 
-    for name, value in (("ANTHROPIC_API_KEY", settings.anthropic_api_key), ("CLAUDE_CODE_OAUTH_TOKEN", settings.claude_code_oauth_token), ("AGENT_MODEL", settings.agent_model)):
+    for name, value in (("ANTHROPIC_API_KEY", settings.anthropic_api_key), ("CLAUDE_CODE_OAUTH_TOKEN", settings.claude_code_oauth_token), ("AGENT_MODEL", settings.agent_model), ("GROQ_API_KEY", settings.groq_api_key), ("TRANSCRIBER", settings.transcriber)):
         if value and not os.environ.get(name):
             os.environ[name] = value
 
@@ -510,11 +519,11 @@ async def open_studio(project_id: str, payload: StudioOpen | None = None, user_i
 
 
 @app.get("/api/v1/projects/{project_id}/timeline/composition")
-async def composition_timeline_view(project_id: str, user_id: str = Depends(current_user_id)):
-    """The latest HyperFrames composition as tracks, or null when there is none."""
+async def composition_timeline_view(project_id: str, composition: str | None = Query(default=None, max_length=300, pattern=r"^compositions/[A-Za-z0-9._-]+$"), user_id: str = Depends(current_user_id)):
+    """A HyperFrames composition (the latest by default) as tracks, or null when there is none."""
 
     await require_project_access(project_id, user_id)
-    return composition_timeline(project_dir(project_id))
+    return composition_timeline(project_dir(project_id), composition)
 
 
 @app.post("/api/v1/projects/{project_id}/timeline/versions", response_model=TimelineVersionResponse, status_code=201)
@@ -637,6 +646,22 @@ async def save_transcript(asset_id: str, payload: TranscriptUpdate, user_id: str
     return {"asset_id": asset_id, "words": words, "language": payload.language or asset.get("transcript_language"), "reviewed": True, "status": "ready"}
 
 
+@app.post("/api/v1/assets/{asset_id}/transcript/align", response_model=TranscriptResponse)
+async def align_transcript(asset_id: str, payload: ScriptAlign, user_id: str = Depends(current_user_id)):
+    """Time the user's own script from the speech; returned for review, not saved."""
+
+    asset = await asset_for(asset_id, user_id)
+    folder = project_dir(asset["project_id"]) / "proxies" / asset_id
+    try:
+        heard = json.loads((folder / "transcript.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        heard = []
+    if not heard:
+        raise HTTPException(status_code=409, detail="This clip has no speech timing yet: wait for the transcription")
+    words = align_script(payload.text, heard)
+    return {"asset_id": asset_id, "words": words, "language": asset.get("transcript_language"), "reviewed": False, "status": asset.get("transcript_status")}
+
+
 @app.post("/api/v1/assets/{asset_id}/transcribe", status_code=202)
 async def retranscribe(asset_id: str, payload: TranscribeRequest, user_id: str = Depends(current_user_id)):
     """Run Whisper again, for example with the language set explicitly."""
@@ -709,8 +734,9 @@ async def project_outputs(project_id: str, user_id: str = Depends(current_user_i
     files = sorted(output_files(root), key=lambda path: path.stat().st_mtime, reverse=True)
     catalog = read_catalog(root)
     runs = sorted((run for run in repo.runs.values() if run["project_id"] == project_id and run.get("skill")), key=lambda run: str(run["created_at"]))
+    styles = [skill["name"] for skill in repo.skills.values() if not str(skill["name"]).startswith(("hyperframes", "media-use"))]
     outputs = []
-    for path in files[:50]:
+    for path in files[:200]:
         relative = path.relative_to(root).as_posix()
         stat = path.stat()
         entry = catalog.get(relative)
@@ -720,14 +746,107 @@ async def project_outputs(project_id: str, user_id: str = Depends(current_user_i
             meta = composition_meta(folder) if folder else {}
             made_at = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
             run = next((item for item in reversed(runs) if str(item["created_at"]) <= made_at), runs[-1] if runs else None)
-            entry = {"composition": folder.relative_to(root).as_posix() if folder else None, "skill": meta.get("skill") or (run or {}).get("skill"), "title": meta.get("title") or (run or {}).get("brief")}
+            entry = {"composition": folder.relative_to(root).as_posix() if folder else None, "skill": meta.get("skill") or (run or {}).get("skill"), "title": meta.get("title") or (run or {}).get("brief"), "run_id": meta.get("run_id") or (run or {}).get("id")}
+            # The time match can pick the wrong reel; a style named in the file wins.
+            entry["skill"] = guess_style([path.stem], styles) or entry["skill"]
+        elif not entry.get("run_id") and entry.get("composition"):
+            # Renders of a reel made before renders were tagged with their run.
+            entry = {**entry, "run_id": composition_meta(root / entry["composition"]).get("run_id")}
+        if not entry.get("skill"):
+            entry = {**entry, "skill": guess_style([path.stem, entry.get("composition") or ""], styles)}
         outputs.append({
             "name": path.name, "path": relative, "size_bytes": stat.st_size,
             "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc),
             "url": project_files.url(f"{project_id}/{relative}"),
-            "composition": entry.get("composition"), "skill": entry.get("skill"), "title": entry.get("title"),
+            "composition": entry.get("composition"), "skill": entry.get("skill"), "title": entry.get("title"), "run_id": entry.get("run_id"), "edit_id": entry.get("edit_id"),
         })
     return outputs
+
+
+# -- Manual editor: cut, sound, captions and text without the agent -----------
+
+
+def project_clips(project_id: str, asset_ids: list[str]) -> list[dict[str, Any]]:
+    clips = []
+    for asset_id in asset_ids:
+        asset = repo.assets.get(asset_id)
+        if not asset or asset["project_id"] != project_id or asset.get("kind") != "video" or asset.get("role") == "resource":
+            raise HTTPException(status_code=422, detail=f"Not a video clip of this project: {asset_id}")
+        clips.append(asset)
+    return clips
+
+
+def stored_edit(project_id: str, edit_id: str) -> manual_edit.EditDoc:
+    try:
+        return manual_edit.load_edit(project_dir(project_id), edit_id)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Edit not found") from exc
+
+
+@app.get("/api/v1/projects/{project_id}/edits", response_model=list[manual_edit.EditDoc])
+async def list_manual_edits(project_id: str, user_id: str = Depends(current_user_id)):
+    await require_project_access(project_id, user_id)
+    return manual_edit.list_edits(project_dir(project_id))
+
+
+@app.post("/api/v1/projects/{project_id}/edits", response_model=manual_edit.EditDoc, status_code=201)
+async def create_manual_edit(project_id: str, payload: ManualEditCreate, user_id: str = Depends(current_user_id)):
+    await require_project_access(project_id, user_id)
+    project = project_dir(project_id)
+    doc = manual_edit.new_edit(payload.name, project_clips(project_id, payload.asset_ids))
+    doc.captions = manual_edit.captions_from_words(doc.clips, {clip.asset_id: manual_edit.read_words(project, clip.asset_id) for clip in doc.clips})
+    return manual_edit.save_edit(project, doc)
+
+
+@app.get("/api/v1/projects/{project_id}/edits/{edit_id}", response_model=manual_edit.EditDoc)
+async def get_manual_edit(project_id: str, edit_id: str, user_id: str = Depends(current_user_id)):
+    await require_project_access(project_id, user_id)
+    return stored_edit(project_id, edit_id)
+
+
+@app.put("/api/v1/projects/{project_id}/edits/{edit_id}", response_model=manual_edit.EditDoc)
+async def save_manual_edit(project_id: str, edit_id: str, payload: manual_edit.EditDoc, user_id: str = Depends(current_user_id)):
+    await require_project_access(project_id, user_id)
+    current = stored_edit(project_id, edit_id)
+    project_clips(project_id, sorted({clip.asset_id for clip in payload.clips}))
+    doc = payload.model_copy(update={"id": current.id, "created_at": current.created_at})
+    return manual_edit.save_edit(project_dir(project_id), doc)
+
+
+@app.delete("/api/v1/projects/{project_id}/edits/{edit_id}", status_code=204)
+async def delete_manual_edit(project_id: str, edit_id: str, user_id: str = Depends(current_user_id)):
+    await require_project_access(project_id, user_id)
+    stored_edit(project_id, edit_id)
+    shutil.rmtree(manual_edit.edit_dir(project_dir(project_id), edit_id), ignore_errors=True)
+
+
+@app.post("/api/v1/projects/{project_id}/edits/{edit_id}/captions", response_model=manual_edit.EditDoc)
+async def regenerate_captions(project_id: str, edit_id: str, user_id: str = Depends(current_user_id)):
+    """Rebuild caption lines from the clips' (reviewed) transcripts and the current cuts."""
+
+    await require_project_access(project_id, user_id)
+    project = project_dir(project_id)
+    doc = stored_edit(project_id, edit_id)
+    doc.captions = manual_edit.captions_from_words(doc.clips, {clip.asset_id: manual_edit.read_words(project, clip.asset_id) for clip in doc.clips})
+    return manual_edit.save_edit(project, doc)
+
+
+@app.post("/api/v1/projects/{project_id}/edits/{edit_id}/render", response_model=RenderResponse, status_code=202)
+async def render_manual_edit(project_id: str, edit_id: str, user_id: str = Depends(current_user_id)):
+    await require_project_access(project_id, user_id)
+    doc = stored_edit(project_id, edit_id)
+    if not doc.clips:
+        raise HTTPException(status_code=422, detail="Add at least one clip before exporting")
+    clips = project_clips(project_id, sorted({clip.asset_id for clip in doc.clips}))
+    render = {"id": str(uuid4()), "project_id": project_id, "preset": "preview", "status": "queued", "output_url": None, "verification": None, "created_at": now()}
+    repo.renders[render["id"]] = render
+    await publish_event(render["id"], {"type": "render.created", "status": "queued", "record": render})
+    await enqueue_job("manual_render", {
+        "render_id": render["id"], "project_id": project_id, "edit_id": doc.id,
+        "sources": {asset["id"]: asset["storage_key"] for asset in clips},
+        "has_audio": {asset["id"]: bool((asset.get("probe") or {}).get("has_audio", True)) for asset in clips},
+    })
+    return render
 
 
 @app.get("/api/v1/projects/{project_id}/memory", response_model=MemoryUpdate)
@@ -768,14 +887,20 @@ def run_prompt(brief: str, skill: str | None) -> str:
 
 
 @app.post("/api/v1/projects/{project_id}/runs", response_model=RunResponse, status_code=202, dependencies=[Depends(expensive_rate_limit)])
-async def create_run(project_id: str, payload: RunCreate, user_id: str = Depends(current_user_id)):
+async def create_run(project_id: str, payload: RunCreate, user_id: str = Depends(current_user_id), preview_for: str | None = None):
     await require_project_access(project_id, user_id)
     run_id = str(uuid4())
+    caption_skill = payload.caption_skill if payload.caption_skill and payload.caption_skill != payload.skill else None
+    if caption_skill and not any(skill["name"] == caption_skill for skill in repo.skills.values()):
+        raise HTTPException(status_code=422, detail=f"Unknown caption style: {caption_skill}")
+    brand = payload.brand.model_dump() if payload.brand else None
     # Fast mode needs a style that ships a fast.json manifest; others use the agent.
     mode = "fast" if payload.mode == "fast" and skill_supports_fast(project_dir(project_id), payload.skill) else "agent"
+    clips = [clip for clip in dict.fromkeys(payload.clips) if (asset := repo.assets.get(clip)) and asset["project_id"] == project_id and asset_role(asset) == "clip"] if payload.kind == "people" else []
+    asset_id = (clips[0] if clips else payload.asset_id) if payload.kind == "people" else None
     planned = mode == "agent" and requires_plan(scene_count=payload.scene_count, motion_graphics=payload.motion_graphics, brief=payload.brief)
     status_value = "waiting_for_approval" if planned else "queued"
-    run = {"id": run_id, "project_id": project_id, "status": status_value, "brief": payload.brief, "skill": payload.skill, "mode": mode, "asset_id": payload.asset_id, "quick": payload.quick, "sdk_session_id": None, "usage": {}, "created_at": now()}
+    run = {"id": run_id, "project_id": project_id, "status": status_value, "brief": payload.brief, "skill": payload.skill, "mode": mode, "asset_id": asset_id, "quick": payload.quick, "kind": payload.kind, "intensity": payload.intensity, "clips": clips, "caption_skill": caption_skill, "brand": brand, "sdk_session_id": None, "usage": {}, "created_at": now()}
     repo.runs[run_id] = run
     if database.enabled:
         await database.create_agent_run(run_id, project_id, payload.brief, {"max_turns": 80, "max_budget_usd": 10.0, "wall_clock_timeout_s": 1800})
@@ -787,7 +912,8 @@ async def create_run(project_id: str, payload: RunCreate, user_id: str = Depends
         storyboard = Storyboard(project_id=project_id, brief=payload.brief, scenes=[StoryScene(id=f"scene-{index + 1}", title=f"Scene {index + 1}", start_ms=index * duration, end_ms=(index + 1) * duration) for index in range(payload.scene_count)])
         write_storyboard(project_dir(project_id), storyboard)
     else:
-        await enqueue_job("agent_run", {"run_id": run_id, "project_id": project_id, "brief": run_prompt(payload.brief, payload.skill), "skill": payload.skill, "title": payload.brief, "mode": mode, "asset_id": payload.asset_id, "quick": payload.quick, "prompt": payload.brief if mode == "fast" else None, "resources": attached_resources(project_id, payload.resources)})
+        await enqueue_job("agent_run", {"run_id": run_id, "project_id": project_id, "brief": run_prompt(payload.brief, payload.skill), "skill": payload.skill, "title": payload.brief, "mode": mode, "asset_id": asset_id, "quick": payload.quick, "prompt": payload.brief if mode == "fast" else None, "resources": attached_resources(project_id, payload.resources),
+                                     "kind": payload.kind, "intensity": payload.intensity, "clips": clips, "cut": payload.cut, "script": payload.script, "caption_skill": caption_skill, "brand": brand, "preview_for": preview_for})
     return run
 
 
@@ -843,7 +969,7 @@ async def answer_run(run_id: str, payload: UserMessage, user_id: str = Depends(c
             storyboard = Storyboard.model_validate_json(storyboard_path.read_text(encoding="utf-8"))
             storyboard.status, storyboard.approved_by = "approved", user_id
             write_storyboard(storyboard_path.parent, storyboard)
-        await enqueue_job("agent_run", {"run_id": run_id, "project_id": run["project_id"], "brief": run_prompt(run["brief"], run.get("skill")), "skill": run.get("skill"), "title": run["brief"]})
+        await enqueue_job("agent_run", {"run_id": run_id, "project_id": run["project_id"], "brief": run_prompt(run["brief"], run.get("skill")), "skill": run.get("skill"), "title": run["brief"], "kind": run.get("kind"), "intensity": run.get("intensity"), "caption_skill": run.get("caption_skill"), "brand": run.get("brand")})
         return {"accepted": True, "status": run["status"]}
     # Any other answer is a follow-up turn in the same SDK session, so the
     # agent keeps its context: the plan, the files it read, its questions.
@@ -949,7 +1075,65 @@ async def composition_preview(composition_id: str, user_id: str = Depends(curren
 
 @app.get("/api/v1/skills", response_model=list[SkillResponse])
 async def list_skills(user_id: str = Depends(current_user_id)):
-    return list(repo.skills.values())
+    root = Path(settings.projects_root)
+    skills = []
+    for skill in repo.skills.values():
+        folder = root / skill_previews.PREVIEWS_DIR / str(skill["name"])
+        links = {f"{stem}_url": preview_files.url(f"{skill['name']}/{file}") for stem, file in (("preview", "preview.mp4"), ("cover", "cover.jpg")) if (folder / file).is_file()}
+        skills.append({**skill, **links})
+    return skills
+
+
+@app.get("/api/v1/skill-previews/{name}/{file}")
+async def skill_preview_file(name: str, file: str, request: Request):
+    if file not in skill_previews.PREVIEW_FILES or not skill_previews.NAME.match(name):
+        raise HTTPException(status_code=404, detail="Not found")
+    key = f"{name}/{file}"
+    try:
+        valid = preview_files.verify(key, int(request.query_params.get("expires") or "0"), request.query_params.get("signature") or "")
+    except ValueError:
+        valid = False
+    if not valid:
+        raise HTTPException(status_code=403, detail="Preview URL has expired or is invalid")
+    try:
+        return FileResponse(preview_files.path(key))
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Not found") from exc
+
+
+def style_or_404(name: str) -> str:
+    if not any(skill["name"] == name for skill in repo.skills.values()) or name.startswith(("hyperframes", "media-use")):
+        raise HTTPException(status_code=404, detail="Style not found")
+    return name
+
+
+@app.post("/api/v1/skills/{name}/preview", status_code=202)
+async def set_skill_preview(name: str, payload: SkillPreviewFromOutput, user_id: str = Depends(current_user_id)):
+    """Use one of the user's finished videos as the style's trailer."""
+
+    style_or_404(name)
+    await require_project_access(payload.project_id, user_id)
+    root = project_dir(payload.project_id)
+    if payload.path not in {path.relative_to(root).as_posix() for path in output_files(root)}:
+        raise HTTPException(status_code=404, detail="Video not found")
+    await enqueue_job("skill_preview", {"name": name, "project_id": payload.project_id, "path": payload.path})
+    return {"status": "queued"}
+
+
+@app.post("/api/v1/skills/{name}/preview/generate", response_model=RunResponse, status_code=202, dependencies=[Depends(expensive_rate_limit)])
+async def generate_skill_preview(name: str, user_id: str = Depends(current_user_id)):
+    """Make a short demo in the style (one fast edit, uses credits) and keep it as its trailer."""
+
+    style_or_404(name)
+    project = next((item for item in repo.projects.values() if item.get("owner_id") == user_id and item.get("name") == PREVIEW_PROJECT), None)
+    if project is None:
+        created = await create_project(ProjectCreate(name=PREVIEW_PROJECT, workflow="motion-graphics"), user_id=user_id)
+        project = created if isinstance(created, dict) else created.model_dump()
+    run = await create_run(project["id"], RunCreate(brief=skill_previews.DEMO_BRIEF, skill=name, mode="fast", kind="product", intensity="balanced"), user_id=user_id, preview_for=name)
+    return run
+
+
+PREVIEW_PROJECT = "Style previews"
 
 
 @app.post("/api/v1/projects/{project_id}/skills/{skill_id}", response_model=SkillResponse)
@@ -1063,6 +1247,63 @@ async def create_style_extraction(payload: StyleExtractionCreate, user_id: str =
     await publish_event(extraction_id, {"type": "style.created", "record": record})
     await enqueue_job("style_extraction", {"extraction_id": extraction_id, "owner_id": user_id, "urls": urls, "name": name, "notes": payload.notes, "base": payload.base})
     return record
+
+
+@app.post("/api/v1/skill-edits", response_model=StyleExtractionResponse, status_code=202, dependencies=[Depends(expensive_rate_limit)])
+async def create_skill_edit(payload: SkillEditCreate, user_id: str = Depends(current_user_id)):
+    """Ask Claude to change a style; built-in styles are saved under a new name."""
+
+    if not settings.style_extraction_enabled:
+        raise HTTPException(status_code=403, detail="Style editing is disabled")
+    source = next((skill for skill in repo.skills.values() if skill["name"] == payload.skill and skill.get("enabled", True)), None)
+    if source is None or str(payload.skill).startswith(("hyperframes", "media-use")):
+        raise HTTPException(status_code=404, detail="Style not found")
+    try:
+        target = slugify_skill_name(payload.save_as) if payload.save_as and payload.save_as.strip() else payload.skill
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if skill_editing.is_builtin(target):
+        raise HTTPException(status_code=409, detail=f"{target} is a built-in style; save your version under a new name")
+    if target != payload.skill and any(skill["name"] == target for skill in repo.skills.values()):
+        raise HTTPException(status_code=409, detail=f"A style named {target} already exists")
+    if any(record.get("kind") == "edit" and record.get("name") == target and record["status"] in ("queued", "analyzing") for record in repo.extractions.values()):
+        raise HTTPException(status_code=409, detail=f"{target} is already being edited")
+    extraction_id = str(uuid4())
+    record = {"id": extraction_id, "kind": "edit", "status": "queued", "urls": [], "name": target, "notes": payload.request, "base": payload.skill, "skill_name": None, "error": None, "style_spec": None, "owner_id": user_id, "created_at": now()}
+    repo.extractions[extraction_id] = record
+    await publish_event(extraction_id, {"type": "style.created", "record": record})
+    await enqueue_job("skill_edit", {"extraction_id": extraction_id, "owner_id": user_id, "source": payload.skill, "name": target, "request": payload.request})
+    return record
+
+
+@app.get("/api/v1/skills/{name}/versions")
+async def list_skill_versions(name: str, user_id: str = Depends(current_user_id)):
+    return [{"id": path.name, "saved_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)} for path in skill_editing.versions(settings_projects_root(), slugify_or_404(name))]
+
+
+@app.post("/api/v1/skills/{name}/restore", response_model=SkillResponse)
+async def restore_skill_version(name: str, user_id: str = Depends(current_user_id)):
+    """Undo the last edit of a style: put the version before it back."""
+
+    name = slugify_or_404(name)
+    try:
+        target = skill_editing.restore_previous(settings_projects_root(), name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    summary = skill_summary(target)
+    await publish_event(f"skill:{name}", {"type": "skill.restored", "skill": summary})
+    return next(skill for skill in repo.skills.values() if skill["name"] == name and skill["scope"] == "user")
+
+
+def slugify_or_404(name: str) -> str:
+    try:
+        return slugify_skill_name(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Style not found") from exc
+
+
+def settings_projects_root() -> Path:
+    return Path(settings.projects_root).resolve()
 
 
 @app.get("/api/v1/style-extractions", response_model=list[StyleExtractionResponse])
