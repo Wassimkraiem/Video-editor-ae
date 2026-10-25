@@ -7,7 +7,7 @@ import { DownloadIcon, PlayIcon } from "./icons";
 
 export type PreviewSource = { url: string; title: string; subtitle?: string; composition?: string | null; skill?: string | null };
 
-export function PreviewPanel({ source, outputs, renders, onSelect, onRender, canRender, onOpenInStudio, working = false }: {
+export function PreviewPanel({ source, outputs, renders, onSelect, onRender, canRender, onOpenInStudio, onExportAE, working = false }: {
   source?: PreviewSource;
   outputs: Output[];
   renders: Render[];
@@ -15,6 +15,7 @@ export function PreviewPanel({ source, outputs, renders, onSelect, onRender, can
   onRender: () => void;
   canRender: boolean;
   onOpenInStudio: (composition: string) => void;
+  onExportAE?: (composition: string) => void;
   working?: boolean;
 }) {
   const active = renders.find((render) => render.status === "queued" || render.status === "running");
@@ -26,6 +27,7 @@ export function PreviewPanel({ source, outputs, renders, onSelect, onRender, can
       action={
         <div className="flex items-center gap-2">
           {source?.composition && <Button size="sm" variant="secondary" onClick={() => onOpenInStudio(source.composition as string)}>Open in Studio</Button>}
+          {source?.composition && onExportAE && <Button size="sm" variant="ghost" title="Rebuild this video as an editable After Effects project" onClick={() => onExportAE(source.composition as string)}>Export to After Effects</Button>}
           {source && <a href={mediaUrl(source.url)} download className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-slate-300 hover:bg-white/[0.06]"><DownloadIcon /> Download</a>}
           <Button size="sm" variant="secondary" onClick={onRender} disabled={!canRender || Boolean(active)}>{active ? <><Spinner /> Rendering</> : "Render"}</Button>
         </div>

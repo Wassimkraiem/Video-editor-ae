@@ -26,6 +26,9 @@ def apply_event(repo: MemoryRepository, stream_id: str, event: dict[str, Any]) -
     if kind == "user.answer" and stream_id in repo.runs and event.get("status"):
         repo.runs[stream_id]["status"] = event["status"]
         return
+    if kind == "ae.export.ready" and stream_id in repo.runs:
+        repo.runs[stream_id]["export_path"] = event.get("path")
+        return
     if kind == "run.cancelled" and stream_id in repo.runs:
         repo.runs[stream_id]["status"] = "cancelled"
         return

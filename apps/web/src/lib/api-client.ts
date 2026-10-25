@@ -59,7 +59,7 @@ export type Asset = { id: string; project_id: string; filename: string; kind: st
 export type TranscriptWord = { id: string; text: string; start_ms: number; end_ms: number; segment?: number };
 export type Transcript = { asset_id: string; words: TranscriptWord[]; language?: string | null; reviewed: boolean; status?: string | null };
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "waiting_for_approval" | "revision_requested";
-export type Run = { id: string; project_id: string; status: RunStatus | string; brief: string; skill?: string | null; sdk_session_id?: string | null; usage: Record<string, unknown>; created_at: string; mode?: "fast" | "agent" | string; asset_id?: string | null };
+export type Run = { id: string; project_id: string; status: RunStatus | string; brief: string; skill?: string | null; sdk_session_id?: string | null; usage: Record<string, unknown>; created_at: string; mode?: "fast" | "agent" | string; asset_id?: string | null; export_url?: string | null; ae_export?: string | null };
 export type Render = { id: string; project_id: string; preset: string; status: string; output_url?: string | null; error?: string | null; created_at: string };
 export type Output = { name: string; path: string; size_bytes: number; modified_at: string; url: string; composition?: string | null; skill?: string | null; title?: string | null; run_id?: string | null; edit_id?: string | null };
 export type BrandKit = { colors: string[]; fonts: string[]; notes: string };
@@ -97,6 +97,7 @@ export const api = {
   exportEdit: (projectId: string, editId: string) => apiFetch<Render>(`/projects/${projectId}/edits/${editId}/render`, { method: "POST" }),
   runs: (projectId: string) => apiFetch<Run[]>(`/projects/${projectId}/runs`),
   run: (runId: string) => apiFetch<Run>(`/runs/${runId}`),
+  exportToAfterEffects: (projectId: string, composition: string) => apiFetch<Run>(`/projects/${projectId}/ae-exports`, { method: "POST", body: json({ composition }) }),
   createRun: (projectId: string, body: { brief: string; skill?: string | null; scene_count?: number; motion_graphics?: boolean; mode?: "fast" | "agent"; asset_id?: string | null; quick?: boolean; resources?: string[]; kind?: "people" | "motion" | "product"; intensity?: "minimal" | "balanced" | "bold"; clips?: string[]; cut?: boolean; script?: string; caption_skill?: string | null; brand?: BrandKit | null }) => apiFetch<Run>(`/projects/${projectId}/runs`, { method: "POST", body: json(body) }),
   answerRun: (runId: string, answer: string, resources: string[] = []) => apiFetch<{ accepted: boolean; status?: string }>(`/runs/${runId}/messages`, { method: "POST", body: json({ answer, resources }) }),
   cancelRun: (runId: string) => apiFetch<Run>(`/runs/${runId}/cancel`, { method: "POST" }),

@@ -138,7 +138,8 @@ async def handle_job(job: JobRecord, context: WorkerContext) -> dict[str, Any]:
         guidance = {"kind": payload.get("kind"), "intensity": payload.get("intensity"), "script": payload.get("script"), "brand": payload.get("brand")}
 
         def with_guidance(text: str) -> str:
-            return compose_request(text, **guidance) if any(guidance.values()) else text
+            # An After Effects export has its own complete brief: no editing guidance.
+            return compose_request(text, **guidance) if any(guidance.values()) and not payload.get("ae_export") else text
 
         # Several clips (or "cut my takes"): join them into one clip first; the
         # style then edits that clip like any other. Follow-ups reuse it.
@@ -174,7 +175,9 @@ async def handle_job(job: JobRecord, context: WorkerContext) -> dict[str, Any]:
             prompt = f"{prompt}\n\n{attached}"
         if notes := style_notes.prepare(project, payload.get("skill")):
             prompt = f"{prompt}\n\n{notes}"
-        if kind != "people":
+        if payload.get("ae_export"):
+            pass
+        elif kind != "people":
             prompt += "\n\nThere is no footage for this video: build every scene."
         elif brief := media_brief(project):
             prompt = f"{brief}\n## Request\n\n{prompt}"
@@ -194,6 +197,14 @@ async def handle_job(job: JobRecord, context: WorkerContext) -> dict[str, Any]:
             record_turn(project, before, run_id=str(payload["run_id"]), skill=payload.get("skill"), title=str(payload.get("title") or payload.get("brief") or ""))
         if extra_cost:
             result.usage["total_cost_usd"] = round(float(result.usage.get("total_cost_usd") or 0) + extra_cost, 4)
+        if payload.get("ae_export") and result.status == "succeeded":
+            from .ae_export import zip_export
+
+            try:
+                bundle = await asyncio.to_thread(zip_export, project, str(payload["ae_export"]))
+                await context.emit(str(payload["run_id"]), {"type": "ae.export.ready", "path": bundle.relative_to(project).as_posix()})
+            except FileNotFoundError as exc:
+                await context.emit(str(payload["run_id"]), {"type": "ae.export.failed", "error": str(exc)})
         if context.agent_persistence:
             await context.agent_persistence.update_agent_run(str(payload["run_id"]), {"status": result.status, "sdk_session_id": result.session_id, "budget_json": result.usage})
         if result.status == "succeeded":

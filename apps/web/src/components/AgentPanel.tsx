@@ -2,15 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import type { Asset, BrandKit, Run, Skill } from "../lib/api-client";
+import { mediaUrl, type Asset, type BrandKit, type Run, type Skill } from "../lib/api-client";
 import { buildChat, type ChatItem, type RunEvent } from "../lib/agent-events";
 import { Badge, Button, Card, Spinner, StatusBadge, Textarea } from "./ui";
 import { ResourcePicker } from "./ResourcePicker";
-import { AlertIcon, BookIcon, CheckIcon, ChevronIcon, FileIcon, SendIcon, SparkIcon, StopIcon, TerminalIcon } from "./icons";
+import { AlertIcon, BookIcon, CheckIcon, ChevronIcon, DownloadIcon, FileIcon, SendIcon, SparkIcon, StopIcon, TerminalIcon } from "./icons";
 
 /** House styles first; helper skills (hyperframes-*, media-use) stay out of the picker. */
 const FEATURED = ["auto-style", "wassim-style", "devin-style", "talking-head-glass-edit", "kinetic-editorial-reel", "talking-head-recut", "product-launch-video", "product-launch-motion", "general-video", "performance-ad", "ui-feature-reel", "offer-ad", "testimonial-proof", "listicle-explainer", "three-step-promo", "kinetic-type-recap", "teaser-countdown"];
-const HELPER = /^(hyperframes|media-use)/;
+const HELPER = /^(hyperframes|media-use|ae-builder)/;
 
 const PROMPTS: Record<string, string> = {
   "wassim-style": "Edit my latest clip in my house style. Darija captions with Latin tech words, keep the default blue palette.",
@@ -210,6 +210,12 @@ export function AgentPanel({ projectId, run, events, styles, agentReady, onStart
       </div>
 
       <div className="space-y-3 border-t border-line p-3">
+        {run?.export_url && (
+          <a href={mediaUrl(run.export_url)} download className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500/15 px-3 py-2 text-sm font-medium text-emerald-200 ring-1 ring-inset ring-emerald-400/30 hover:bg-emerald-500/25">
+            <DownloadIcon /> Download After Effects project (.zip)
+          </a>
+        )}
+        {run?.ae_export && !run.export_url && run.status === "succeeded" && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-200">The export finished without a build script; ask the agent to finish it.</p>}
         {!agentReady && <p className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-200"><AlertIcon /> ANTHROPIC_API_KEY is not set on the server; runs will fail.</p>}
         {awaitingApproval ? (
           <div className="flex gap-2">

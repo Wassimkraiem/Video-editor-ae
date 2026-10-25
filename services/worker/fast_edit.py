@@ -32,7 +32,13 @@ MAX_REPAIRS = 2
 
 # Styles without their own engine: one call writes the whole composition.
 GENERIC_DIR = Path(__file__).resolve().parent / "fast_generic"
-HELPER_SKILLS = {"media-use"}
+HELPER_SKILLS = {"media-use", "ae-builder"}
+# Tool skills the styles (or exports) call; never offered as a style.
+HELPER_PREFIXES = ("hyperframes", "media-use", "ae-builder")
+
+
+def is_helper(name: str) -> bool:
+    return str(name).startswith(HELPER_PREFIXES)
 # What a caption style contributes when it is combined with another style's motion.
 CAPTION_DOCS = ("SKILL.md", "references/style-guide.md")
 MAX_DOC_CHARS = 60_000

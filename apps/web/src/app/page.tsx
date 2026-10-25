@@ -65,7 +65,8 @@ export default function StudioPage() {
   const active = useMemo(() => projects.find((project) => project.id === activeId), [projects, activeId]);
   const styles = useMemo(() => stylesFrom(skills), [skills]);
   // The edit page shows one video: the outputs of the selected chat only.
-  const runOutputs = useMemo(() => (run ? outputs.filter((output) => output.run_id === run.id) : []), [outputs, run]);
+  // An After Effects export chat shows the video it rebuilds.
+  const runOutputs = useMemo(() => (run ? outputs.filter((output) => (run.ae_export ? output.composition === run.ae_export : output.run_id === run.id)) : []), [outputs, run]);
   const composition = preview?.composition ?? runOutputs[0]?.composition ?? undefined;
 
   // Restore the session from the httpOnly refresh cookie on reload.
@@ -281,6 +282,16 @@ export default function StudioPage() {
     setStep(4);
     setView("create");
   };
+  async function exportToAfterEffects(reel: string) {
+    if (!activeId || !window.confirm("Rebuild this video as an editable After Effects project?\n\nThis is a full Claude agent run (usually a few dollars of credits, 10-30 minutes). You get a .zip with the build script, fonts and assets to run in After Effects.")) return;
+    try {
+      const next = await api.exportToAfterEffects(activeId, reel);
+      setRun(next);
+      setRuns((current) => [next, ...current]);
+    } catch (reason) {
+      window.alert(reason instanceof Error ? reason.message : "Could not start the export");
+    }
+  }
   const newChat = () => { setRun(undefined); setEvents([]); };
   const refreshAssets = () => { if (activeId) void api.assets(activeId).then(setAssets).catch(() => undefined); };
   const openRun = (item: Run) => {
@@ -376,7 +387,7 @@ export default function StudioPage() {
                 <StudioPanel projectId={activeId} composition={composition} onRender={startRender} rendering={rendering} request={studioRequest} />
               ) : (
                 <>
-                  <PreviewPanel source={preview} outputs={runOutputs} renders={renders} onSelect={setPreview} canRender={Boolean(composition)} onRender={() => startRender(composition)} onOpenInStudio={openInStudio} working={run?.status === "queued" || run?.status === "running"} />
+                  <PreviewPanel source={preview} outputs={runOutputs} renders={renders} onSelect={setPreview} canRender={Boolean(composition)} onRender={() => startRender(composition)} onOpenInStudio={openInStudio} onExportAE={(reel) => void exportToAfterEffects(reel)} working={!run?.ae_export && (run?.status === "queued" || run?.status === "running")} />
                   {composition && <TimelinePanel version={timeline} onEdit={timeline?.source ? () => setStage("studio") : undefined} />}
                   {run?.status === "waiting_for_approval" && storyboard && storyboard.scenes.length > 0 && <StoryboardPanel storyboard={storyboard} />}
                 </>

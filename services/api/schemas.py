@@ -190,6 +190,14 @@ class RunResponse(BaseModel):
     sdk_session_id: str | None = None
     usage: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+    # Set on After Effects exports once the zip is ready (a signed download link).
+    export_url: str | None = None
+    # The composition an After Effects export rebuilds.
+    ae_export: str | None = None
+
+
+class AeExportCreate(BaseModel):
+    composition: str = Field(max_length=300, pattern=r"^compositions/[A-Za-z0-9._-]+$")
 
 
 class UserMessage(BaseModel):

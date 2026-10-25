@@ -54,6 +54,7 @@ from .schemas import (
     ManualEditCreate,
     SkillEditCreate,
     SkillPreviewFromOutput,
+    AeExportCreate,
     MemoryUpdate,
     OutputResponse,
     StudioOpen,
@@ -71,9 +72,9 @@ from services.worker.skill_parser import validate_skill_archive
 from services.worker.style_extraction import BASE_STYLES, skill_summary, slugify_skill_name, split_urls, validate_user_urls
 from .rate_limit import expensive_rate_limit
 from services.worker.quality_harness.models import ProjectProfile
-from services.worker.fast_edit import fast_engine, skill_supports_fast
+from services.worker.fast_edit import fast_engine, is_helper, skill_supports_fast
 from services.worker.catalog import composition_for, composition_meta, guess_style, output_files, read_catalog
-from services.worker import manual_edit, skill_editing, skill_previews
+from services.worker import ae_export, manual_edit, skill_editing, skill_previews
 from services.worker.alignment import align_script
 from services.worker.transcription import write_transcript
 from services.worker.project_bootstrap import SKILL_SOURCES, SKILLS_ROOT, bootstrap_project
@@ -734,7 +735,7 @@ async def project_outputs(project_id: str, user_id: str = Depends(current_user_i
     files = sorted(output_files(root), key=lambda path: path.stat().st_mtime, reverse=True)
     catalog = read_catalog(root)
     runs = sorted((run for run in repo.runs.values() if run["project_id"] == project_id and run.get("skill")), key=lambda run: str(run["created_at"]))
-    styles = [skill["name"] for skill in repo.skills.values() if not str(skill["name"]).startswith(("hyperframes", "media-use"))]
+    styles = [skill["name"] for skill in repo.skills.values() if not is_helper(skill["name"])]
     outputs = []
     for path in files[:200]:
         relative = path.relative_to(root).as_posix()
@@ -917,10 +918,40 @@ async def create_run(project_id: str, payload: RunCreate, user_id: str = Depends
     return run
 
 
+def public_run(run: dict[str, Any]) -> dict[str, Any]:
+    path = run.get("export_path")
+    if not path or not (project_dir(run["project_id"]) / path).is_file():
+        return run
+    return {**run, "export_url": project_files.url(f"{run['project_id']}/{path}")}
+
+
+@app.post("/api/v1/projects/{project_id}/ae-exports", response_model=RunResponse, status_code=202, dependencies=[Depends(expensive_rate_limit)])
+async def create_ae_export(project_id: str, payload: AeExportCreate, user_id: str = Depends(current_user_id)):
+    """Rebuild a finished video as an editable After Effects project (a full agent run)."""
+
+    await require_project_access(project_id, user_id)
+    root = project_dir(project_id)
+    if not (root / payload.composition / "index.html").is_file():
+        raise HTTPException(status_code=404, detail="That video has no HyperFrames project to export")
+    timeline = composition_timeline(root, payload.composition) or {}
+    data = timeline.get("data") or {}
+    brief = ae_export.export_brief(payload.composition, data.get("width"), data.get("height"), data.get("fps"), data.get("duration_ms"))
+    run_id = str(uuid4())
+    title = f"Export to After Effects: {Path(payload.composition).name}"
+    run = {"id": run_id, "project_id": project_id, "status": "queued", "brief": title, "skill": ae_export.SKILL, "mode": "agent", "asset_id": None, "quick": False, "kind": "motion", "intensity": None, "clips": [], "caption_skill": None, "brand": None,
+           "ae_export": payload.composition, "sdk_session_id": None, "usage": {}, "created_at": now()}
+    repo.runs[run_id] = run
+    if database.enabled:
+        await database.create_agent_run(run_id, project_id, title, {"max_turns": 120, "max_budget_usd": 10.0, "wall_clock_timeout_s": 3600})
+    await publish_event(run_id, {"type": "run.created", "status": "queued", "brief": title, "skill": ae_export.SKILL, "record": run})
+    await enqueue_job("agent_run", {"run_id": run_id, "project_id": project_id, "brief": run_prompt(brief, ae_export.SKILL), "skill": ae_export.SKILL, "title": title, "mode": "agent", "ae_export": payload.composition})
+    return run
+
+
 @app.get("/api/v1/projects/{project_id}/runs", response_model=list[RunResponse])
 async def list_runs(project_id: str, user_id: str = Depends(current_user_id)):
     await require_project_access(project_id, user_id)
-    runs = [run for run in repo.runs.values() if run["project_id"] == project_id]
+    runs = [public_run(run) for run in repo.runs.values() if run["project_id"] == project_id]
     return sorted(runs, key=lambda run: run["created_at"], reverse=True)
 
 
@@ -946,7 +977,7 @@ async def run_for(run_id: str, user_id: str) -> dict[str, Any]:
 
 @app.get("/api/v1/runs/{run_id}", response_model=RunResponse)
 async def get_run(run_id: str, user_id: str = Depends(current_user_id)):
-    return await run_for(run_id, user_id)
+    return public_run(await run_for(run_id, user_id))
 
 
 @app.post("/api/v1/runs/{run_id}/messages")
@@ -973,7 +1004,7 @@ async def answer_run(run_id: str, payload: UserMessage, user_id: str = Depends(c
         return {"accepted": True, "status": run["status"]}
     # Any other answer is a follow-up turn in the same SDK session, so the
     # agent keeps its context: the plan, the files it read, its questions.
-    await enqueue_job("agent_run", {"run_id": run_id, "project_id": run["project_id"], "prompt": payload.answer, "resume": run.get("sdk_session_id"), "skill": run.get("skill"), "title": run["brief"], "mode": run.get("mode", "agent"), "asset_id": run.get("asset_id"), "quick": run.get("quick", False), "resources": resources})
+    await enqueue_job("agent_run", {"run_id": run_id, "project_id": run["project_id"], "prompt": payload.answer, "resume": run.get("sdk_session_id"), "skill": run.get("skill"), "title": run["brief"], "mode": run.get("mode", "agent"), "asset_id": run.get("asset_id"), "quick": run.get("quick", False), "resources": resources, **({"ae_export": run["ae_export"]} if run.get("ae_export") else {})})
     return {"accepted": True, "status": run["status"]}
 
 
@@ -1102,7 +1133,7 @@ async def skill_preview_file(name: str, file: str, request: Request):
 
 
 def style_or_404(name: str) -> str:
-    if not any(skill["name"] == name for skill in repo.skills.values()) or name.startswith(("hyperframes", "media-use")):
+    if not any(skill["name"] == name for skill in repo.skills.values()) or is_helper(name):
         raise HTTPException(status_code=404, detail="Style not found")
     return name
 
@@ -1256,7 +1287,7 @@ async def create_skill_edit(payload: SkillEditCreate, user_id: str = Depends(cur
     if not settings.style_extraction_enabled:
         raise HTTPException(status_code=403, detail="Style editing is disabled")
     source = next((skill for skill in repo.skills.values() if skill["name"] == payload.skill and skill.get("enabled", True)), None)
-    if source is None or str(payload.skill).startswith(("hyperframes", "media-use")):
+    if source is None or is_helper(payload.skill):
         raise HTTPException(status_code=404, detail="Style not found")
     try:
         target = slugify_skill_name(payload.save_as) if payload.save_as and payload.save_as.strip() else payload.skill

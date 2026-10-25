@@ -1,0 +1,4 @@
+[{"key":"TEST_Comp > TEST_Pop > ADBE Scale","curve":"springElegant","t0":0.2,"dur":0.65,"from":0,"to":100},
+ {"key":"TEST_Comp > TEST_Pop > ADBE Position_1","curve":"gravity","t0":0.2,"dur":0.38,"from":-200,"to":540},
+ {"key":"TEST_Comp > CTRL_Burst_Impact > 1","curve":"springElegant","t0":0.58,"dur":0.8,"from":0,"to":100},
+ {"key":"TEST_Comp > Card_1 > ADBE Scale","curve":"outBack","t0":1.0,"dur":0.6,"from":0,"to":100}]
